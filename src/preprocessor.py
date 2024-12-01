@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.ensemble import RandomForestClassifier
-from imblearn.over_sampling import ADASYN
+from imblearn.over_sampling import ADASYN, RandomOverSampler
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -75,11 +75,11 @@ class PreProcessor:
             # Define and store continuous features
             self.continuous_features_ = ['BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth']
             
-            # Initialize and fit scaler
+            # Initialize and fit scaler on all continuous features at once
             self.scaler = StandardScaler()
-            for col in self.continuous_features_:
-                if col in X_clean.columns:
-                    self.scaler.fit(X_clean[[col]])
+            continuous_features_present = [col for col in self.continuous_features_ if col in X_clean.columns]
+            if continuous_features_present:
+                self.scaler.fit(X_clean[continuous_features_present])
             
             return self
         except Exception as e:
@@ -108,12 +108,11 @@ class PreProcessor:
             # Define and store continuous features
             self.continuous_features_ = ['BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth']
             
-            # Initialize and fit scaler
+            # Initialize and fit scaler on all continuous features at once
             self.scaler = StandardScaler()
-            for col in self.continuous_features_:
-                if col in X_clean.columns:
-                    self.scaler.fit(X_clean[[col]])
-                    X_clean[col] = self.scaler.transform(X_clean[[col]]).astype('float32')
+            continuous_features_present = [col for col in self.continuous_features_ if col in X_clean.columns]
+            if continuous_features_present:
+                X_clean[continuous_features_present] = self.scaler.fit_transform(X_clean[continuous_features_present]).astype('float32')
             
             # Store original feature values before creating new features
             self.original_features = {col: X_clean[col].copy() for col in self.feature_names_}
@@ -167,9 +166,9 @@ class PreProcessor:
             
             # Scale features
             print("\nScaling features...")
-            for col in self.continuous_features_:
-                if col in X_clean.columns:
-                    X_clean[col] = self.scaler.transform(X_clean[[col]]).astype('float32')
+            continuous_features_present = [col for col in self.continuous_features_ if col in X_clean.columns]
+            if continuous_features_present:
+                X_clean[continuous_features_present] = self.scaler.transform(X_clean[continuous_features_present]).astype('float32')
             
             # Create a new DataFrame with original features
             result = pd.DataFrame(0, index=X_clean.index, columns=self.feature_names_)

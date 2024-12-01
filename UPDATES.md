@@ -2,6 +2,90 @@
 
 ## Latest Changes (Most Recent First)
 
+### 2024-03-21: Model Performance Analysis and Interactive Visualization
+
+#### Performance Metrics Review
+- **Current Performance**:
+  - Screening Stage (Threshold: 0.2)
+    - Accuracy: 0.786
+    - Precision: 0.346
+    - Recall: 0.607
+    - F1 Score: 0.441
+  - Confirmation Stage (Threshold: 0.6)
+    - Accuracy: 0.861
+    - Precision: 0.531
+    - Recall: 0.037
+    - F1 Score: 0.069
+  - Overall Metrics
+    - ROC AUC: 0.806
+    - Average Precision: 0.387
+    - Brier Score: 0.102
+
+#### Areas for Improvement
+- **Identified Issues**:
+  - Low recall in confirmation stage (0.037)
+  - Moderate precision in confirmation stage (0.531)
+  - Class imbalance affecting model performance
+
+#### Proposed Enhancements
+1. **Threshold Optimization**
+   - Consider adjusting screening threshold for better precision
+   - Lower confirmation threshold to improve recall
+   - Need to find optimal balance between precision and recall
+
+2. **Model Calibration**
+   - Increase calibration models from 5 to 10 for better uncertainty estimates
+   - Implement class weights to handle imbalanced data
+   - Consider SMOTE or other advanced sampling techniques
+
+#### Visualization Updates
+- Added interactive Plotly dashboard with:
+  - Prediction Uncertainty vs Probability plot
+  - Distribution of Uncertainties visualization
+  - Calibration Curve
+  - Decision Boundaries with uncertainty regions
+- Dashboard accessible via local server (http://127.0.0.1:9799/)
+
+#### Next Steps
+1. Implement proposed model enhancements
+2. Conduct thorough performance evaluation after changes
+3. Consider adding static plot options for non-interactive use cases
+
+### 2024-03-20: Feature Scaling and Uncertainty Handling Fixes
+
+#### Preprocessor Improvements
+- **Purpose**: Fix feature scaling and data type compatibility issues
+- **Changes**:
+  - Refactored feature scaling to handle all continuous features together
+  - Fixed data type inconsistencies in feature transformation
+  - Improved handling of missing features during transform
+  - Enhanced error handling and logging
+
+#### Key Improvements
+1. **Feature Scaling**
+   - Now scales all continuous features together using a single StandardScaler
+   - Maintains feature name consistency between fit and transform
+   - Properly handles missing features during transformation
+   - Added type casting to float32 for numerical stability
+
+2. **Uncertainty Handling**
+   - Updated prediction code to handle detailed uncertainty metrics
+   - Now properly processes epistemic, aleatoric, and total uncertainty
+   - Enhanced confidence score calculation using total uncertainty
+   - Added detailed uncertainty components to prediction output
+
+3. **Code Robustness**
+   - Improved error messages for missing features
+   - Added validation for continuous feature presence
+   - Enhanced data type consistency checks
+   - Better handling of edge cases in transformation
+
+These improvements ensure:
+- Consistent feature scaling across all stages
+- Proper handling of uncertainty metrics
+- More robust data type handling
+- Better error reporting and debugging
+
 ### 2024-03-19: Data Type Compatibility and Warning Fixes
 
 #### Preprocessor Improvements

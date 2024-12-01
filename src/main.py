@@ -271,12 +271,16 @@ def predict(data_path: str) -> None:
         # Combine with uncertainty (weighted average)
         return 0.7 * (1 - uncertainty) + 0.3 * normalized_distance
 
-    confidences = np.array([calculate_confidence(p, u) for p, u in zip(probas, uncertainties)])
+    confidences = np.array([calculate_confidence(p, u) for p, u in zip(probas, uncertainties['total'])])
     
     # Create results DataFrame
     results = pd.DataFrame({
         'Probability': probas,
-        'Uncertainty': uncertainties,
+        'Total_Uncertainty': uncertainties['total'],
+        'Epistemic_Uncertainty': uncertainties['epistemic'],
+        'Aleatoric_Uncertainty': uncertainties['aleatoric'],
+        'Screening_Confidence': uncertainties['screening_confidence'],
+        'Confirmation_Confidence': uncertainties['confirmation_confidence'],
         'Prediction': (probas >= 0.6).astype(int),
         'Confidence': confidences,
         'Risk_Level': pd.cut(confidences, 
@@ -290,7 +294,7 @@ def predict(data_path: str) -> None:
     
     # Create visualization
     viz.create_interactive_dashboard(
-        probas, uncertainties, None,
+        probas, uncertainties['total'], None,
         {'screening': 0.2, 'confirmation': 0.6}  # Updated thresholds
     )
 

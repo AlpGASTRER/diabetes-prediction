@@ -66,18 +66,23 @@ pip install -r requirements.txt
 4. Download the dataset:
 - Visit [Kaggle Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset)
 - Download `diabetes_binary_health_indicators_BRFSS2015.csv`
-- Place it in the `data` directory
+- Place it directly in the project root directory (not in a subdirectory)
 
 ## Usage
 
+Make sure to activate the conda environment before running any commands:
+```bash
+conda activate diabetes_pred
+```
+
 ### Training
 ```bash
-python src/main.py --mode train --data data/diabetes_binary_health_indicators_BRFSS2015.csv
+python src/main.py --mode train
 ```
 
 ### Prediction
 ```bash
-python src/main.py --mode predict --data new_data.csv
+python src/main.py --mode predict
 ```
 
 ### Testing
@@ -89,6 +94,12 @@ Run a quick smoke test to verify the basic functionality:
 ```bash
 python src/main.py --mode test
 ```
+
+Or using the full conda path:
+```bash
+C:\Users\ahmed\.conda\envs\diabetes_pred\python.exe src/main.py --mode test
+```
+
 This will:
 - Train the model on a small subset (10%) of the dataset
 - Test prediction functionality
@@ -99,13 +110,6 @@ Run the full test suite for thorough testing during development:
 ```bash
 pytest tests/test_pipeline.py -v
 ```
-This includes comprehensive tests for:
-- Data preprocessing
-- Model training and prediction
-- Duplicate handling
-- Clinical thresholds
-- Class balance
-- Uncertainty calibration
 
 ## Project Structure
 ```
