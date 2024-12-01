@@ -1,121 +1,152 @@
-# Diabetes Prediction Model
+# Diabetes Prediction with Uncertainty Estimation
 
-An advanced machine learning system for diabetes prediction using ensemble methods and medical-grade preprocessing.
+A robust machine learning pipeline for diabetes prediction with uncertainty estimation, using a two-stage ensemble approach and advanced preprocessing techniques. The model is trained on the [Diabetes Health Indicators Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset) from the BRFSS 2015 survey.
 
-## Project Overview
+## Dataset
 
-This project implements a robust diabetes prediction model using a combination of state-of-the-art machine learning techniques. It features medical-grade data validation, advanced preprocessing, and an ensemble of models optimized for both accuracy and clinical relevance.
+The dataset contains health indicators that may be used to predict diabetes, collected from the Behavioral Risk Factor Surveillance System (BRFSS) 2015 health survey. It includes:
 
-## Architecture
+- **Size**: 253,680 survey responses
+- **Features**: 21 health indicators
+- **Target**: Binary classification (0: No diabetes, 1: Diabetes/Prediabetes)
+- **Class Distribution**: Imbalanced dataset (~88% non-diabetic, ~12% diabetic)
 
-The project is structured into three main components:
+### Key Features
+- Demographic: Age, Education, Income
+- Health Conditions: High Blood Pressure, High Cholesterol, Heart Disease
+- Lifestyle: Physical Activity, Smoking, Alcohol Consumption
+- Health Metrics: BMI, Mental Health, Physical Health
+- Healthcare Access: Insurance, Doctor Visits
 
-### 1. Preprocessor (`src/preprocessor.py`)
-- Medical-grade data validation
-- Age-specific feature normalization
-- Clinical feature engineering
-- Advanced outlier detection
-- Feature importance calculation using multiple methods
+## Features
 
-### 2. Ensemble Model (`src/ensemble_model.py`)
-- Two-stage prediction approach:
-  - Stage 1: XGBoost for initial screening
-  - Stage 2: LightGBM and CatBoost for refined prediction
-- Uncertainty quantification via Monte Carlo dropout
-- Dynamic cross-validation based on dataset size
-- Demographic subgroup analysis
+### Preprocessing Pipeline
+- Advanced data cleaning and feature engineering
+- Medical risk score calculation
+- Outlier detection using Local Outlier Factor (LOF)
+- Feature importance analysis using Random Forest
+- ADASYN for handling class imbalance
+- Robust scaling with proper dtype handling
 
-### 3. Training Pipeline (`train_ensemble.py`)
-- Multi-factor stratified cross-validation
-- Comprehensive performance metrics
-- Demographic fairness analysis
-- Detailed logging and visualization
+### Model Architecture
+- Two-stage ensemble prediction
+- Multiple calibrated models for robustness
+- Uncertainty estimation via:
+  - Monte Carlo dropout
+  - Model variance
+  - Ensemble disagreement
+- Comprehensive uncertainty calibration
 
-## Key Features
+### Visualization Tools
+- Interactive dashboards using Plotly
+- Feature importance plots
+- Uncertainty distribution analysis
+- Model calibration curves
+- Performance metrics visualization
 
-- **Robust Preprocessing**: 
-  - Medical threshold-based outlier detection
-  - Age-specific feature normalization
-  - Clinical feature interactions (BMI-Age risk, cardiovascular score)
+## Installation
 
-- **Advanced Model Architecture**:
-  - Ensemble learning with three complementary models
-  - Uncertainty quantification
-  - Batch processing for large datasets
-  - Clinical risk stratification
-
-- **Performance Optimization**:
-  - Adaptive parameters based on dataset size
-  - Efficient feature importance calculation
-  - Parallel processing for large-scale training
-
-## Dependencies
-
+1. Create and activate conda environment:
+```bash
+conda create -n diabetes_pred python=3.11
+conda activate diabetes_pred
 ```
-pandas>=1.3.0
-numpy>=1.19.0
-scikit-learn>=0.24.0
-xgboost>=1.4.0
-lightgbm>=3.2.0
-catboost>=0.26.0
-imblearn>=0.8.0
+
+2. Clone the repository:
+```bash
+git clone https://github.com/yourusername/diabetes-prediction.git
+cd diabetes-prediction
 ```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Download the dataset:
+- Visit [Kaggle Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset)
+- Download `diabetes_binary_health_indicators_BRFSS2015.csv`
+- Place it in the `data` directory
 
 ## Usage
 
-### Quick Test
-```python
-python train_ensemble.py --mode test
+### Training
+```bash
+python src/main.py --mode train --data data/diabetes_binary_health_indicators_BRFSS2015.csv
 ```
 
-### Full Training
-```python
-python train_ensemble.py --mode train
+### Prediction
+```bash
+python src/main.py --mode predict --data new_data.csv
 ```
 
-## Code Structure
+### Testing
 
+The project includes two types of tests:
+
+#### Quick Integration Test
+Run a quick smoke test to verify the basic functionality:
+```bash
+python src/main.py --mode test
+```
+This will:
+- Train the model on a small subset (10%) of the dataset
+- Test prediction functionality
+- Provide immediate pass/fail feedback
+
+#### Development Tests
+Run the full test suite for thorough testing during development:
+```bash
+pytest tests/test_pipeline.py -v
+```
+This includes comprehensive tests for:
+- Data preprocessing
+- Model training and prediction
+- Duplicate handling
+- Clinical thresholds
+- Class balance
+- Uncertainty calibration
+
+## Project Structure
 ```
 diabetes-prediction/
+├── data/                # Dataset directory
 ├── src/
-│   ├── preprocessor.py      # Data preprocessing and feature engineering
-│   ├── ensemble_model.py    # Core model implementation
-│   └── utils/              # Utility functions
-├── train_ensemble.py        # Main training pipeline
-├── requirements.txt         # Project dependencies
-└── README.md               # This documentation
+│   ├── main.py         # Main pipeline
+│   ├── preprocessor.py  # Data preprocessing
+│   ├── ensemble_model.py# Model implementation
+│   └── visualization.py # Visualization tools
+├── tests/              # Test suite
+├── models/            # Saved models
+├── plots/             # Generated plots
+├── requirements.txt   # Dependencies
+├── UPDATES.md        # Changelog
+└── README.md         # Documentation
 ```
 
-## Model Parameters
+## Performance Metrics
 
-The model automatically adapts its parameters based on dataset size:
-
-### Test Mode (< 10k samples)
-- Lighter preprocessing
-- Reduced ensemble complexity
-- More emphasis on validation
-
-### Production Mode (500k+ samples)
-- Full feature engineering
-- Comprehensive ensemble training
-- Parallel processing optimization
-
-## Future Development
-
-Areas for potential improvement:
-1. Integration of temporal medical data
-2. Enhanced demographic fairness metrics
-3. API deployment infrastructure
-4. Real-time prediction capabilities
+The model provides comprehensive evaluation metrics:
+- ROC-AUC Score
+- PR-AUC Score (for imbalanced data)
+- Calibration metrics
+- Uncertainty correlation
+- Confusion matrix metrics
 
 ## Contributing
 
-When contributing to this project:
-1. Follow the existing code structure and documentation patterns
-2. Add comprehensive docstrings to new functions
-3. Update this README for significant changes
-4. Include unit tests for new features
+Please see our [Contributing Guidelines](CONTRIBUTING.md) for details on:
+- Code style
+- Testing requirements
+- Pull request process
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- [Diabetes Health Indicators Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset) from BRFSS 2015
+- Scikit-learn, XGBoost, and LightGBM for model implementations
+- Imbalanced-learn for ADASYN implementation
+- Plotly for interactive visualizations

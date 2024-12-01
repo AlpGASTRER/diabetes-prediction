@@ -1,383 +1,288 @@
-"""
-Advanced ensemble model for diabetes prediction.
-
-This module implements a sophisticated ensemble learning approach combining
-multiple state-of-the-art gradient boosting models (XGBoost, LightGBM, and CatBoost)
-for accurate diabetes prediction. The ensemble uses a two-stage approach:
-1. Initial screening with XGBoost
-2. Refined prediction with LightGBM and CatBoost
-
-Features:
-- Monte Carlo dropout for uncertainty estimation
-- Dynamic cross-validation based on dataset size
-- Batch processing for large datasets
-- Demographic subgroup analysis
-- Clinical risk stratification
-
-Example:
-    ```python
-    model = EnsembleModel()
-    model.fit(X_train, y_train)
-    predictions = model.predict(X_test)
-    uncertainty = model.predict_proba(X_test)
-    ```
-
-Author: Codeium AI
-Last Modified: 2024
-"""
-
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.model_selection import StratifiedKFold
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
+from typing import Tuple, Dict, Union, Optional
+import xgboost as xgb
+import lightgbm as lgb
 from catboost import CatBoostClassifier
-import logging
-from typing import Tuple, List, Dict, Optional, Union
-from dataclasses import dataclass
-from sklearn.utils.class_weight import compute_class_weight
-from sklearn.metrics import accuracy_score, roc_auc_score, recall_score, precision_score, auc, precision_recall_curve, classification_report
+from sklearn.model_selection import train_test_split
 from sklearn.calibration import CalibratedClassifierCV
-from joblib import dump, load
-import time
+from sklearn.metrics import roc_auc_score, recall_score, precision_score, brier_score_loss
+from scipy.stats import entropy
+import warnings
+warnings.filterwarnings('ignore')
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-@dataclass
-class ModelMetrics:
-    """
-    Container for model performance metrics.
+class DiabetesEnsemblePredictor:
+    """Two-stage ensemble model for diabetes prediction with uncertainty estimation"""
     
-    Attributes:
-        accuracy: Overall prediction accuracy
-        precision: Precision score for positive class
-        recall: Recall score for positive class
-        f1_score: F1 score (harmonic mean of precision and recall)
-        auc_roc: Area under ROC curve
-        demographic_metrics: Performance metrics by demographic group
-    """
-    accuracy: float
-    precision: float
-    recall: float
-    f1_score: float
-    auc_roc: float
-    demographic_metrics: Dict[str, Dict[str, float]]
-
-class EnsembleModel(BaseEstimator, ClassifierMixin):
-    """
-    Advanced ensemble model for diabetes prediction.
-    
-    This class implements a sophisticated ensemble learning approach that combines
-    multiple gradient boosting models for accurate diabetes prediction. It includes
-    uncertainty estimation, demographic analysis, and clinical risk stratification.
-    
-    Attributes:
-        xgboost_model: XGBoost classifier for initial screening
-        lightgbm_model: LightGBM classifier for refined prediction
-        catboost_model: CatBoost classifier for refined prediction
-        n_monte_carlo: Number of Monte Carlo iterations for uncertainty
-        batch_size: Size of batches for processing large datasets
-        logger: Logger instance for tracking model behavior
-    """
-    
-    def __init__(self,
-                 n_monte_carlo: int = 10,
-                 batch_size: int = 10000,
-                 random_state: int = 42):
-        """
-        Initialize the ensemble model with specified parameters.
+    def __init__(self, 
+                 screening_threshold: float = 0.2,  # Lowered from 0.3 for better recall
+                 confirmation_threshold: float = 0.6,  # Lowered from 0.7 for better balance
+                 n_calibration_models: int = 5,  # Increased for better uncertainty
+                 mc_iterations: int = 10):  # MC Dropout iterations
+        """Initialize the ensemble predictor.
         
         Args:
-            n_monte_carlo: Number of Monte Carlo iterations for uncertainty
-            batch_size: Size of batches for processing large datasets
-            random_state: Random seed for reproducibility
+            screening_threshold: Threshold for screening stage (default: 0.2)
+                Lower threshold to catch more potential cases
+            confirmation_threshold: Threshold for confirmation stage (default: 0.6)
+                Balanced threshold considering both precision and recall
+            n_calibration_models: Number of calibrated models for uncertainty (default: 5)
+            mc_iterations: Number of Monte Carlo iterations for uncertainty (default: 10)
         """
-        self.n_monte_carlo = n_monte_carlo
-        self.batch_size = batch_size
-        self.random_state = random_state
-        self.logger = logging.getLogger(__name__)
+        self.screening_threshold = screening_threshold
+        self.confirmation_threshold = confirmation_threshold
+        self.n_calibration_models = n_calibration_models
+        self.mc_iterations = mc_iterations
         
-        # Initialize models
-        self._initialize_models()
+        # Initialize model containers
+        self.models = {}
+        self.calibrated_models = {}
+        self.model_weights = {}
         
-        # Initialize metadata
-        self.metadata = {
-            'model_version': '2.0.0',
-            'training_date': None,
-            'feature_importance': {},
-            'performance_metrics': {},
-            'model_parameters': {
-                'n_monte_carlo': n_monte_carlo,
-                'batch_size': batch_size,
-                'random_state': random_state
-            }
-        }
+        for stage in ['screening', 'confirmation']:
+            self.models[stage] = {}
+            self.calibrated_models[stage] = {}
+            self.model_weights[stage] = {}
+        
+        self.is_fitted = False
     
-    def get_params(self, deep: bool = True) -> Dict:
-        """Get parameters for this estimator.
+    def fit(self, X: Union[np.ndarray, pd.DataFrame], 
+            y: Union[np.ndarray, pd.Series]) -> 'DiabetesEnsemblePredictor':
+        """Train the two-stage ensemble model."""
+        X = X.values if hasattr(X, 'values') else X
+        y = y.values if hasattr(y, 'values') else y
         
-        Args:
-            deep: If True, will return the parameters for this estimator and
-                contained subobjects that are estimators.
+        # Split data for two stages
+        X_screen, X_confirm, y_screen, y_confirm = train_test_split(
+            X, y, test_size=0.3, random_state=42, stratify=y
+        )
         
-        Returns:
-            params: Parameter names mapped to their values.
-        """
-        return {
-            'n_monte_carlo': self.n_monte_carlo,
-            'batch_size': self.batch_size,
-            'random_state': self.random_state
-        }
-    
-    def set_params(self, **params) -> 'EnsembleModel':
-        """Set the parameters of this estimator.
+        # Train both stages
+        for stage, (X_stage, y_stage) in zip(
+            ['screening', 'confirmation'],
+            [(X_screen, y_screen), (X_confirm, y_confirm)]
+        ):
+            print(f"\nTraining {stage} models...")
+            self._train_stage(stage, X_stage, y_stage)
         
-        Args:
-            **params: Estimator parameters.
-        
-        Returns:
-            self: Estimator instance.
-        """
-        if not params:
-            return self
-            
-        for key, value in params.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-            else:
-                raise ValueError(f'Invalid parameter {key} for estimator {self.__class__.__name__}')
-        
+        self.is_fitted = True
         return self
     
-    def score(self, X: pd.DataFrame, y: pd.Series) -> float:
-        """Return the mean accuracy on the given test data and labels.
+    def predict_proba_with_uncertainty(self, 
+                                     X: Union[np.ndarray, pd.DataFrame]
+                                     ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+        """Get predictions with detailed uncertainty estimates."""
+        if not self.is_fitted:
+            raise ValueError("Model must be fitted before making predictions")
         
-        Args:
-            X: Test samples
-            y: True labels for X
+        X = X.values if hasattr(X, 'values') else X
         
-        Returns:
-            score: Mean accuracy of self.predict(X) with respect to y
-        """
-        return accuracy_score(y, self.predict(X))
-            
-    def _validate_input(self, X: Union[np.ndarray, pd.DataFrame], 
-                       y: Optional[Union[np.ndarray, pd.Series]] = None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        """Validate and preprocess input data.
+        # Get screening predictions
+        screen_probs = self._get_stage_predictions(X, 'screening')
+        screen_mask = screen_probs >= self.screening_threshold
         
-        Args:
-            X: Input features
-            y: Target values (optional)
-            
-        Returns:
-            Tuple of processed X and y arrays
-        """
-        # Validate X
-        if not isinstance(X, np.ndarray) and not hasattr(X, 'values'):
-            raise ValueError("X must be a numpy array or pandas DataFrame")
-            
-        # Convert to numpy if pandas
-        X_arr = X.values if hasattr(X, 'values') else X
+        # Get confirmation predictions only for screened samples
+        confirm_probs = np.zeros_like(screen_probs)
+        if np.any(screen_mask):
+            confirm_probs[screen_mask] = self._get_stage_predictions(
+                X[screen_mask], 'confirmation'
+            )
         
-        # Check for NaN/Inf values
-        if np.any(np.isnan(X_arr)) or np.any(np.isinf(X_arr)):
-            raise ValueError("Input contains NaN or Inf values")
-            
-        if y is not None:
-            # Validate y
-            if not isinstance(y, np.ndarray) and not hasattr(y, 'values'):
-                raise ValueError("y must be a numpy array or pandas Series")
-                
-            y_arr = y.values if hasattr(y, 'values') else y
-            
-            # Convert y to integer type
-            y_arr = y_arr.astype(int)
-            
-            # Check class values
-            unique_classes = np.unique(y_arr)
-            if not np.array_equal(unique_classes, np.array([0, 1])):
-                raise ValueError("y must be binary with classes 0 and 1")
-                
-            # Check class balance
-            class_counts = np.bincount(y_arr)
-            if np.min(class_counts) < 10:
-                raise ValueError(f"Each class must have at least 10 samples")
-                
-            return X_arr, y_arr
-            
-        return X_arr, None
-            
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
-        """Fit the ensemble model"""
-        try:
-            self.logger.info("Fitting ensemble model...")
-            
-            # Validate input
-            X, y = self._validate_input(X, y)
-            
-            # Fit base models
-            self.xgboost_model.fit(X, y)
-            self.lightgbm_model.fit(X, y)
-            self.catboost_model.fit(X, y)
-            
-            self.is_fitted_ = True
-            
-        except Exception as e:
-            self.logger.error(f"Error during model fitting: {str(e)}")
-            raise
-
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Get probability predictions from ensemble"""
-        if not self.is_fitted_:
-            raise RuntimeError("Model must be fitted before making predictions")
-            
-        try:
-            # Validate input
-            X = self._validate_input(X)[0]
-            
-            # Get base model predictions
-            proba_xgb = self.xgboost_model.predict_proba(X)
-            proba_lgb = self.lightgbm_model.predict_proba(X)
-            proba_cat = self.catboost_model.predict_proba(X)
-            
-            # Weighted average of probabilities
-            ensemble_proba = 0.4 * proba_xgb + 0.3 * proba_lgb + 0.3 * proba_cat
-            
-            return ensemble_proba
-            
-        except Exception as e:
-            self.logger.error(f"Error in predict_proba: {str(e)}")
-            raise
-
-    def predict_with_risk(self, X: pd.DataFrame) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
-        """Predict with clinical risk stratification"""
-        probas = self.predict_proba(X)
+        # Combine predictions
+        final_probs = np.where(screen_mask, confirm_probs, screen_probs)
         
-        # Define risk categories
-        risk_categories = {
-            'Low Risk': (probas < 0.2),
-            'Moderate Risk': (probas >= 0.2) & (probas < 0.5),
-            'High Risk': (probas >= 0.5)
+        # Calculate detailed uncertainties
+        epistemic, aleatoric, total = self._calculate_uncertainties(X)
+        
+        uncertainties = {
+            'epistemic': epistemic,  # Model uncertainty
+            'aleatoric': aleatoric,  # Data uncertainty
+            'total': total,         # Total predictive uncertainty
+            'screening_confidence': np.abs(screen_probs - 0.5) * 2,  # Confidence in screening
+            'confirmation_confidence': np.abs(confirm_probs - 0.5) * 2  # Confidence in confirmation
         }
         
-        # Convert probabilities to predictions with risk-aware thresholding
-        predictions = np.zeros_like(probas, dtype=int)
-        predictions[probas >= 0.5] = 1
-        
-        risk_stratification = {
-            category: mask.astype(int) 
-            for category, mask in risk_categories.items()
-        }
-        
-        return predictions, risk_stratification
-
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Get class predictions from ensemble"""
-        if not self.is_fitted_:
-            raise RuntimeError("Model must be fitted before making predictions")
-            
-        try:
-            # Get probability predictions
-            probas = self.predict_proba(X)
-            
-            # Convert to class predictions
-            return (probas[:, 1] >= 0.5).astype(np.int32)
-            
-        except Exception as e:
-            self.logger.error(f"Error in predict: {str(e)}")
-            raise
-
-    def evaluate(self, X: pd.DataFrame, 
-                y: pd.Series) -> Dict[str, float]:
-        """Evaluate model performance with detailed metrics"""
-        try:
-            if not self.is_fitted_:
-                raise RuntimeError("Model not trained. Call fit() first.")
-                
-            start_time = time.time()
-            
-            # Validate input
-            X, y = self._validate_input(X, y)
-            
-            # Get predictions
-            y_pred = self.predict(X)
-            y_pred_proba = self.predict_proba(X)
-            
-            # Calculate metrics
-            results = {
-                'accuracy': accuracy_score(y, y_pred),
-                'roc_auc': roc_auc_score(y, y_pred_proba[:, 1]),
-                'pos_recall': recall_score(y, y_pred, pos_label=1),
-                'neg_recall': recall_score(y, y_pred, pos_label=0),
-                'pos_precision': precision_score(y, y_pred, pos_label=1),
-                'neg_precision': precision_score(y, y_pred, pos_label=0),
-                'inference_time': time.time() - start_time,
-                'samples_per_second': len(X) / (time.time() - start_time)
-            }
-            
-            # Calculate PR curve metrics
-            precision, recall, _ = precision_recall_curve(y, y_pred_proba[:, 1])
-            results['pr_auc'] = auc(recall, precision)
-            
-            # Add detailed classification report
-            results['classification_report'] = classification_report(y, y_pred, output_dict=True)
-            
-            return results
-            
-        except Exception as e:
-            print(f"Error in evaluation: {str(e)}")
-            raise
-            
-    def _initialize_models(self):
-        """Initialize models with simplified, robust parameters"""
-        self.test_params = {
-            'xgboost': {
-                'n_estimators': 50,
-                'max_depth': 4,
-                'learning_rate': 0.1,
-                'random_state': self.random_state
+        return final_probs, uncertainties
+    
+    def _train_stage(self, stage: str, X: np.ndarray, y: np.ndarray) -> None:
+        """Train all models for a specific stage."""
+        # Base parameters for each model type
+        base_params = {
+            'screening': {
+                'scale_pos_weight': 1.0,  # Balanced weight for fair treatment
+                'early_stopping_rounds': 10,
+                'eval_metric': ['auc', 'aucpr']  # Added PR-AUC for imbalanced data
             },
-            'lightgbm': {
-                'n_estimators': 50,
-                'max_depth': 4,
-                'learning_rate': 0.1,
-                'random_state': self.random_state
-            },
-            'catboost': {
-                'iterations': 50,
-                'max_depth': 4,
-                'learning_rate': 0.1,
-                'random_state': self.random_state,
-                'verbose': False
+            'confirmation': {
+                'scale_pos_weight': 1.0,  # Balanced weight for fair treatment
+                'early_stopping_rounds': 10,
+                'eval_metric': ['auc', 'aucpr']  # Added PR-AUC for imbalanced data
             }
         }
         
-        # Initialize base models
-        self.xgboost_model = XGBClassifier(**self.test_params['xgboost'])
-        self.lightgbm_model = LGBMClassifier(**self.test_params['lightgbm'])
-        self.catboost_model = CatBoostClassifier(**self.test_params['catboost'])
+        # Create validation set for early stopping
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
         
-        # Track if model has been fitted
-        self.is_fitted_ = False
-
-    def _save_model_metadata(self):
-        """Save model metadata"""
-        self.metadata['training_date'] = time.strftime('%Y-%m-%d %H:%M:%S')
-        model_metadata = {
-            'model_weights': {}
+        # Calculate class weights based on data distribution
+        neg_count = np.sum(y_train == 0)
+        pos_count = np.sum(y_train == 1)
+        weight_ratio = neg_count / pos_count if pos_count > 0 else 1.0
+        
+        # Update weights based on actual class distribution
+        base_params[stage]['scale_pos_weight'] = weight_ratio
+        
+        # Train base models with early stopping
+        self.models[stage] = {
+            'xgb': self._train_xgboost(X_train, y_train, X_val, y_val, stage, base_params[stage]),
+            'lgb': self._train_lightgbm(X_train, y_train, X_val, y_val, stage, base_params[stage]),
+            'cat': self._train_catboost(X_train, y_train, X_val, y_val, stage, base_params[stage])
         }
-        self.metadata.update(model_metadata)
-
-    def save(self, filepath: str) -> None:
-        """Save model to disk"""
-        dump(self, filepath)
         
-    @classmethod
-    def load(cls, filepath: str) -> 'EnsembleModel':
-        """Load model from disk"""
-        return load(filepath)
+        # Train calibrated models
+        self._calibrate_models(stage, X, y)
+        
+        # Update model weights
+        self._update_model_weights(stage, X_val, y_val)
+    
+    def _train_xgboost(self, X_train, y_train, X_val, y_val, stage, params):
+        """Train XGBoost model with early stopping."""
+        model = xgb.XGBClassifier(**params)
+        
+        eval_set = [(X_val, y_val)]
+        model.fit(
+            X_train, y_train,
+            eval_set=eval_set,
+            verbose=False
+        )
+        
+        return model
+    
+    def _train_lightgbm(self, X_train, y_train, X_val, y_val, stage, params):
+        """Train LightGBM with early stopping."""
+        model = lgb.LGBMClassifier(
+            num_leaves=31 if stage == 'confirmation' else 15,
+            learning_rate=0.05,
+            n_estimators=1000,
+            objective='binary',
+            random_state=42,
+            scale_pos_weight=params['scale_pos_weight']
+        )
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_val, y_val)],
+            eval_metric='auc',
+            callbacks=[lgb.early_stopping(stopping_rounds=params['early_stopping_rounds'])]
+        )
+        return model
+    
+    def _train_catboost(self, X_train, y_train, X_val, y_val, stage, params):
+        """Train CatBoost with early stopping."""
+        model = CatBoostClassifier(
+            depth=6 if stage == 'confirmation' else 4,
+            learning_rate=0.05,
+            iterations=1000,
+            random_seed=42,
+            verbose=False,
+            eval_metric='AUC',
+            scale_pos_weight=params['scale_pos_weight']
+        )
+        model.fit(
+            X_train, y_train,
+            eval_set=(X_val, y_val),
+            early_stopping_rounds=params['early_stopping_rounds'],
+            verbose=False
+        )
+        return model
+    
+    def _calibrate_models(self, stage: str, X: np.ndarray, y: np.ndarray) -> None:
+        """Calibrate models using stratified k-fold."""
+        print(f"Calibrating {stage} models...")
+        self.calibrated_models[stage] = {name: [] for name in ['xgb', 'lgb', 'cat']}
+        
+        # Use stratified splits for calibration
+        for i in range(self.n_calibration_models):
+            X_cal, X_val, y_cal, y_val = train_test_split(
+                X, y, test_size=0.2, random_state=42+i, stratify=y
+            )
+            
+            for name, model in self.models[stage].items():
+                calibrated = CalibratedClassifierCV(
+                    model, cv='prefit', method='sigmoid'
+                )
+                calibrated.fit(X_cal, y_cal)
+                self.calibrated_models[stage][name].append(calibrated)
+    
+    def _update_model_weights(self, stage: str, X: np.ndarray, y: np.ndarray) -> None:
+        """Update model weights using validation performance."""
+        metrics = {}
+        threshold = self.screening_threshold if stage == 'screening' else self.confirmation_threshold
+        
+        for name in ['xgb', 'lgb', 'cat']:
+            preds = self._get_model_predictions(X, stage, name)
+            metrics[name] = (
+                recall_score(y, preds > threshold)
+                if stage == 'screening'
+                else precision_score(y, preds > threshold, zero_division=1)  # Return 1.0 when no positive predictions
+            )
+        
+        # Softmax normalization of weights
+        exp_metrics = np.exp(list(metrics.values()))
+        sum_exp = np.sum(exp_metrics)
+        self.model_weights[stage] = {
+            name: float(exp/sum_exp)
+            for name, exp in zip(metrics.keys(), exp_metrics)
+        }
+    
+    def _get_model_predictions(self, X: np.ndarray, stage: str, model_name: str) -> np.ndarray:
+        """Get averaged predictions from calibrated models."""
+        return np.mean([
+            model.predict_proba(X)[:, 1]
+            for model in self.calibrated_models[stage][model_name]
+        ], axis=0)
+    
+    def _get_stage_predictions(self, X: np.ndarray, stage: str) -> np.ndarray:
+        """Get weighted ensemble predictions for a stage."""
+        predictions = []
+        weights = []
+        
+        for name in ['xgb', 'lgb', 'cat']:
+            predictions.append(self._get_model_predictions(X, stage, name))
+            weights.append(self.model_weights[stage][name])
+        
+        return np.average(predictions, weights=weights, axis=0)
+    
+    def _calculate_uncertainties(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Calculate multiple uncertainty metrics.
+        
+        Returns:
+            Tuple containing:
+            - Epistemic uncertainty (model uncertainty)
+            - Aleatoric uncertainty (data uncertainty)
+            - Total uncertainty (sum of epistemic and aleatoric)
+        """
+        all_predictions = []
+        
+        # Collect predictions from all models and MC iterations
+        for _ in range(self.mc_iterations):
+            stage_preds = []
+            for stage in ['screening', 'confirmation']:
+                for name in ['xgb', 'lgb', 'cat']:
+                    preds = self._get_model_predictions(X, stage, name)
+                    stage_preds.append(preds)
+            all_predictions.append(np.mean(stage_preds, axis=0))
+        
+        predictions = np.array(all_predictions)
+        
+        # Epistemic uncertainty (model uncertainty)
+        epistemic = np.std(predictions, axis=0)
+        
+        # Aleatoric uncertainty (data uncertainty)
+        mean_p = np.mean(predictions, axis=0)
+        aleatoric = np.mean(predictions * (1 - predictions), axis=0)
+        
+        # Total uncertainty (sum of epistemic and aleatoric)
+        total = epistemic + aleatoric
+        
+        return epistemic, aleatoric, total
