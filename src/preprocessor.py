@@ -5,6 +5,7 @@ from sklearn.neighbors import LocalOutlierFactor
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.ensemble import RandomForestClassifier
 from imblearn.over_sampling import SMOTE, ADASYN, RandomOverSampler
+from typing import Union, Tuple, List, Dict
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -18,12 +19,41 @@ class PreProcessor:
         self.feature_names_ = None
         self.continuous_features_ = None
         self.original_features = None
+        self.feature_order_ = None
+        
+        # Define expected column names
         self.required_columns = [
             'BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth',
-            'HighBP', 'HighChol', 'Smoker', 'Stroke', 'HeartDiseaseorAttack',
-            'PhysActivity', 'Fruits', 'Veggies', 'HvyAlcoholConsump',
-            'AnyHealthcare', 'NoDocbcCost', 'DiffWalk'
+            'HighBP', 'HighChol', 'CholCheck', 'Smoker', 'Stroke', 
+            'HeartDiseaseorAttack', 'PhysActivity', 'Fruits', 'Veggies', 
+            'HvyAlcoholConsump', 'AnyHealthcare', 'NoDocbcCost', 'DiffWalk',
+            'Education', 'Income', 'Sex'
         ]
+        
+        # Column name mappings (dataset -> our names)
+        self.column_mapping = {
+            'Diabetes_binary': 'Diabetes',
+            'HighBP': 'HighBP',
+            'HighChol': 'HighChol',
+            'CholCheck': 'CholCheck',
+            'BMI': 'BMI',
+            'Smoker': 'Smoker',
+            'Stroke': 'Stroke',
+            'HeartDiseaseorAttack': 'HeartDiseaseorAttack',
+            'PhysActivity': 'PhysActivity',
+            'Fruits': 'Fruits',
+            'Veggies': 'Veggies',
+            'HvyAlcoholConsump': 'HvyAlcoholConsump',
+            'AnyHealthcare': 'AnyHealthcare',
+            'NoDocbcCost': 'NoDocbcCost',
+            'GenHlth': 'GenHlth',
+            'MentHlth': 'MentHlth',
+            'PhysHlth': 'PhysHlth',
+            'DiffWalk': 'DiffWalk',
+            'Age': 'Age',
+            'Education': 'Education',
+            'Income': 'Income'
+        }
         
         # Define feature groups
         self.continuous_features = ['BMI', 'PhysHlth', 'MentHlth', 'Age']
@@ -46,7 +76,7 @@ class PreProcessor:
         self.lof = LocalOutlierFactor(
             n_neighbors=20,
             contamination=0.1,
-            novelty=False,  # Set to False for fit_predict
+            novelty=False,
             n_jobs=-1
         )
         self.adasyn = ADASYN(
@@ -57,138 +87,131 @@ class PreProcessor:
         )
         
     def fit(self, X, y=None):
-        """Fit the preprocessor to the data."""
+        """Fit the preprocessor."""
         try:
-            # Store feature names and required columns
-            self.feature_names_ = list(X.columns)
+            # Convert numpy array to DataFrame if necessary
+            if isinstance(X, np.ndarray):
+                X = pd.DataFrame(X, columns=[f'feature_{i}' for i in range(X.shape[1])])
             
-            # Validate required columns
+            # Store original feature names
+            self.original_features = X.columns.tolist()
+            self.feature_names_ = self.required_columns
+            
+            # Validate required columns and add missing ones
             missing_cols = set(self.required_columns) - set(X.columns)
             if missing_cols:
                 print(f"Warning: Missing required columns: {missing_cols}")
+                # Add missing columns with default values
                 for col in missing_cols:
                     print(f"Adding {col} with default value 0")
                     X[col] = 0
             
+            # Ensure columns are in the same order
+            X = X[self.required_columns]
+            
             # Handle missing values
             X_clean = self._handle_missing_values(X)
             
-            # Define and store continuous features
-            self.continuous_features_ = ['BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth']
-            
-            # Initialize and fit scaler on all continuous features at once
-            self.scaler = StandardScaler()
-            continuous_features_present = [col for col in self.continuous_features_ if col in X_clean.columns]
-            if continuous_features_present:
-                self.scaler.fit(X_clean[continuous_features_present])
+            # Scale features
+            if self.scaler is None:
+                self.scaler = StandardScaler()
+                self.scaler.fit(X_clean)
             
             return self
+            
         except Exception as e:
             print(f"Error in fit: {str(e)}")
             raise
 
-    def fit_transform(self, X, y=None):
-        """Fit and transform the data."""
-        try:
-            # Store original feature names and data
-            self.feature_names_ = list(X.columns)
-            X_clean = X.copy()
-            
-            # Handle missing values
-            print("Handling missing values...")
-            X_clean = self._handle_missing_values(X_clean)
-            
-            # Ensure all required columns are present
-            missing_cols = set(self.required_columns) - set(X_clean.columns)
-            if missing_cols:
-                print(f"Warning: Missing required columns: {missing_cols}")
-                for col in missing_cols:
-                    print(f"Adding {col} with default value 0")
-                    X_clean[col] = 0
-            
-            # Define and store continuous features
-            self.continuous_features_ = ['BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth']
-            
-            # Initialize and fit scaler on all continuous features at once
-            self.scaler = StandardScaler()
-            continuous_features_present = [col for col in self.continuous_features_ if col in X_clean.columns]
-            if continuous_features_present:
-                X_clean[continuous_features_present] = self.scaler.fit_transform(X_clean[continuous_features_present]).astype('float32')
-            
-            # Store original feature values before creating new features
-            self.original_features = {col: X_clean[col].copy() for col in self.feature_names_}
-            
-            # Create medical risk scores
-            print("\nCreating medical risk scores...")
-            X_clean = self._create_medical_scores(X_clean)
-            
-            # Create clinical features
-            print("\nCreating clinical features...")
-            X_clean = self._create_clinical_interactions(X_clean)
-            
-            # Create a new DataFrame with original features
-            result = pd.DataFrame(0, index=X_clean.index, columns=self.feature_names_)
-            for col in self.feature_names_:
-                if col in X_clean.columns:
-                    result[col] = X_clean[col]
-                elif col in self.original_features:
-                    result[col] = self.original_features[col]
+    def fit_transform(self, X: pd.DataFrame, y: pd.Series = None) -> Tuple[np.ndarray, pd.Series]:
+        """Fit the preprocessor and transform the data."""
+        # Validate input data
+        X = self._validate_data(X)
         
-            return result, y
-        except Exception as e:
-            print(f"Error in fit_transform: {str(e)}")
-            raise
+        # Store feature names
+        self.feature_names_ = X.columns.tolist()
+        
+        # Handle missing values
+        X = self._handle_missing_values(X)
+        
+        # Fit and transform scaler
+        self.scaler = StandardScaler()
+        X_scaled = self.scaler.fit_transform(X)
+        
+        # Store feature order
+        self.feature_order_ = X.columns.tolist()
+        
+        # Ensure no NaN values exist after scaling
+        if np.isnan(X_scaled).any():
+            print("Warning: NaN values found after scaling, filling with 0")
+            X_scaled = np.nan_to_num(X_scaled, nan=0.0)
+        
+        return X_scaled, y
 
-    def transform(self, X):
-        """Transform the input data using the fitted preprocessor."""
+    def transform(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+        """Transform the input data."""
         try:
-            # Store original data
-            X_clean = X.copy()
+            # Convert numpy array to DataFrame if needed
+            if isinstance(X, np.ndarray):
+                if self.feature_names_ is None:
+                    raise ValueError("feature_names_ not set. Call fit_transform first.")
+                X = pd.DataFrame(X, columns=self.feature_names_)
+            elif isinstance(X, pd.DataFrame):
+                X = X.copy()
+            else:
+                raise ValueError("Input must be a pandas DataFrame or numpy array")
+
+            # Drop target variable if present
+            if 'Diabetes_binary' in X.columns:
+                X = X.drop('Diabetes_binary', axis=1)
             
-            # Ensure all required columns are present
-            missing_cols = set(self.required_columns) - set(X_clean.columns)
+            # Ensure we have all required columns in the correct order
+            missing_cols = set(self.required_columns) - set(X.columns)
             if missing_cols:
-                print(f"Warning: Missing required columns: {missing_cols}")
                 for col in missing_cols:
-                    print(f"Adding {col} with default value 0")
-                    X_clean[col] = 0
+                    print(f"Warning: Adding missing column {col} with default value 0")
+                    X[col] = 0
+            
+            # Ensure columns are in the same order as during training
+            if self.feature_order_ is None:
+                raise ValueError("feature_order_ not set. Call fit_transform first.")
+            
+            # Select and order columns
+            try:
+                X = X[self.feature_order_]
+            except KeyError as e:
+                print(f"Error: Missing columns from feature_order_. Available columns: {X.columns.tolist()}")
+                print(f"Required columns: {self.feature_order_}")
+                raise
             
             # Handle missing values
-            print("Handling missing values...")
-            X_clean = self._handle_missing_values(X_clean)
+            X = self._handle_missing_values(X)
             
-            # Create medical risk scores
-            print("\nCreating medical risk scores...")
-            X_clean = self._create_medical_scores(X_clean)
+            # Convert to numpy array before scaling
+            X_array = X.values
             
-            # Create clinical features
-            print("\nCreating clinical features...")
-            X_clean = self._create_clinical_interactions(X_clean)
+            # Scale features if scaler exists
+            if self.scaler is not None:
+                try:
+                    X_array = self.scaler.transform(X_array)
+                except Exception as e:
+                    print(f"Error during scaling: {str(e)}")
+                    print(f"Input shape: {X_array.shape}")
+                    print(f"Expected features: {len(self.feature_order_)}")
+                    raise
             
-            # Scale features
-            print("\nScaling features...")
-            continuous_features_present = [col for col in self.continuous_features_ if col in X_clean.columns]
-            if continuous_features_present:
-                X_clean[continuous_features_present] = self.scaler.transform(X_clean[continuous_features_present]).astype('float32')
+            # Ensure no NaN values exist after scaling
+            if np.isnan(X_array).any():
+                print("Warning: NaN values found after scaling, filling with 0")
+                X_array = np.nan_to_num(X_array, nan=0.0)
             
-            # Create a new DataFrame with original features
-            result = pd.DataFrame(0, index=X_clean.index, columns=self.feature_names_)
+            return X_array
             
-            # First, copy over all original features from X_clean
-            for col in self.feature_names_:
-                if col in X_clean.columns:
-                    result[col] = X_clean[col]
-                elif col in self.original_features:
-                    result[col] = self.original_features[col].iloc[0]  # Use first value as default
-            
-            # Ensure all features are float32
-            for col in result.columns:
-                result[col] = result[col].astype('float32')
-            
-            return result
-        
         except Exception as e:
             print(f"Error in transform: {str(e)}")
+            print(f"Input type: {type(X)}")
+            if isinstance(X, (pd.DataFrame, np.ndarray)):
+                print(f"Input shape: {X.shape}")
             raise
 
     def _validate_data(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -239,55 +262,49 @@ class PreProcessor:
         """Remove exact duplicates efficiently."""
         return X.drop_duplicates(subset=self.required_columns)
     
-    def _handle_missing_values(self, X):
+    def _handle_missing_values(self, X: pd.DataFrame) -> pd.DataFrame:
         """Handle missing values in the data."""
-        try:
-            X_clean = X.copy()
-            
-            # Fill missing values in continuous features with median
-            continuous_features = ['BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth']
-            for col in continuous_features:
-                if col in X_clean.columns:
-                    median_val = X_clean[col].median()
-                    X_clean[col] = X_clean[col].fillna(median_val)
-            
-            # Fill missing values in categorical features with mode
-            categorical_features = [col for col in X_clean.columns if col not in continuous_features]
-            for col in categorical_features:
-                if col in X_clean.columns:
-                    mode_val = X_clean[col].mode().iloc[0]
-                    X_clean[col] = X_clean[col].fillna(mode_val)
-            
-            # Ensure all required features are present
-            required_features = ['BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth']
-            for feature in required_features:
-                if feature not in X_clean.columns:
-                    print(f"Warning: Required feature {feature} not found in data. Adding with default value.")
-                    X_clean[feature] = 0
-            
-            # Ensure all features are float32
-            for col in X_clean.columns:
-                X_clean[col] = X_clean[col].astype('float32')
-            
-            return X_clean
+        # Fill missing values with appropriate defaults
+        defaults = {
+            'BMI': X['BMI'].dropna().median(),
+            'Age': X['Age'].dropna().median(),
+            'GenHlth': X['GenHlth'].dropna().mode()[0],
+            'MentHlth': X['MentHlth'].dropna().median(),
+            'PhysHlth': X['PhysHlth'].dropna().median(),
+            'HighBP': X['HighBP'].dropna().mode()[0],
+            'HighChol': X['HighChol'].dropna().mode()[0],
+            'Smoker': X['Smoker'].dropna().mode()[0],
+            'Stroke': X['Stroke'].dropna().mode()[0],
+            'HeartDiseaseorAttack': X['HeartDiseaseorAttack'].dropna().mode()[0],
+            'PhysActivity': X['PhysActivity'].dropna().mode()[0],
+            'Fruits': X['Fruits'].dropna().mode()[0],
+            'Veggies': X['Veggies'].dropna().mode()[0],
+            'HvyAlcoholConsump': X['HvyAlcoholConsump'].dropna().mode()[0],
+            'AnyHealthcare': X['AnyHealthcare'].dropna().mode()[0],
+            'NoDocbcCost': X['NoDocbcCost'].dropna().mode()[0],
+            'DiffWalk': X['DiffWalk'].dropna().mode()[0]
+        }
         
-        except Exception as e:
-            print(f"Error in handling missing values: {str(e)}")
-            raise
+        # Fill missing values
+        for col, default in defaults.items():
+            if col in X.columns:
+                X[col] = X[col].fillna(default)
+        
+        return X
 
     def _handle_outliers(self, X: pd.DataFrame) -> pd.DataFrame:
         """Detect and handle outliers using LOF."""
         try:
             # Only detect outliers in continuous features
-            outlier_scores = self.lof.predict(X[self.continuous_features])
+            outlier_scores = self.lof.predict(X)
             outlier_mask = outlier_scores == -1
             
             if outlier_mask.any():
                 print(f"Found {outlier_mask.sum()} outliers")
                 # For outliers, replace with median of non-outlier values
-                for col in self.continuous_features:
-                    non_outlier_median = X.loc[~outlier_mask, col].median()
-                    X.loc[outlier_mask, col] = non_outlier_median
+                for i in range(X.shape[1]):
+                    non_outlier_median = np.nanmedian(X[~outlier_mask, i])
+                    X[outlier_mask, i] = non_outlier_median
                     
             return X
             
@@ -296,109 +313,256 @@ class PreProcessor:
             return X  # Return original data if outlier detection fails
 
     def _create_medical_scores(self, X):
-        """Create medical risk scores with stratification."""
+        """Create medical risk scores based on clinical guidelines."""
         try:
-            # Basic medical risk score (weighted sum of key risk factors)
-            risk_weights = {
-                'BMI': 0.3,
-                'Age': 0.2,
-                'HighBP': 0.15,
-                'HighChol': 0.15,
-                'HeartDiseaseorAttack': 0.2
-            }
+            X = X.copy()
             
-            # Create age groups for stratification
-            X['AgeGroup'] = pd.cut(X['Age'], 
-                                 bins=[0, 35, 45, 55, 65, 100],
-                                 labels=['<35', '35-45', '45-55', '55-65', '>65'])
+            # Ensure all required features exist
+            required_features = ['BMI', 'HighBP', 'HighChol', 'Age']
+            missing_features = [f for f in required_features if f not in self.feature_names_]
+            if missing_features:
+                print(f"Warning: Missing features for risk score calculation: {missing_features}")
+                return X
             
-            # Calculate BMI categories
-            X['BMICategory'] = pd.cut(X['BMI'],
-                                    bins=[0, 18.5, 25, 30, 35, 100],
-                                    labels=['Underweight', 'Normal', 'Overweight', 'Obese', 'SeverelyObese'])
+            # Basic risk score based on key medical factors with safe indexing
+            risk_score = np.zeros(X.shape[0])
             
-            # Calculate basic risk score
-            risk_score = sum(X[col] * weight for col, weight in risk_weights.items())
-            X['BasicRiskScore'] = risk_score
+            # BMI risk (0-3 points)
+            bmi_idx = self.feature_names_.index('BMI')
+            risk_score += (X[:, bmi_idx] >= 30).astype(int) * 3
             
-            # Create comorbidity score
-            comorbidity_factors = ['HighBP', 'HighChol', 'HeartDiseaseorAttack', 'Stroke']
-            X['ComorbidityScore'] = X[comorbidity_factors].sum(axis=1)
+            # Blood pressure risk (0-2 points)
+            bp_idx = self.feature_names_.index('HighBP')
+            risk_score += (X[:, bp_idx] == 1).astype(int) * 2
             
-            # Create lifestyle score (inverse scoring for positive factors)
-            X['LifestyleScore'] = (
-                (1 - X['PhysActivity']) * 0.4 +
-                (1 - X['Fruits']) * 0.2 +
-                (1 - X['Veggies']) * 0.2 +
-                X['Smoker'] * 0.2
-            )
+            # Cholesterol risk (0-2 points)
+            chol_idx = self.feature_names_.index('HighChol')
+            risk_score += (X[:, chol_idx] == 1).astype(int) * 2
             
-            # Create healthcare access score
-            X['HealthcareAccessScore'] = (
-                X['AnyHealthcare'] * 0.6 +
-                (1 - X['NoDocbcCost']) * 0.4
-            )
+            # Age risk (0-3 points)
+            age_idx = self.feature_names_.index('Age')
+            risk_score += ((X[:, age_idx] >= 45) & (X[:, age_idx] < 65)).astype(int) * 2
+            risk_score += (X[:, age_idx] >= 65).astype(int) * 3
             
-            # Create composite risk categories
-            X['RiskCategory'] = pd.qcut(X['BasicRiskScore'], q=5, 
-                                      labels=['VeryLow', 'Low', 'Moderate', 'High', 'VeryHigh'])
+            # Add risk score as new feature
+            X = np.hstack((X, risk_score.reshape(-1, 1)))
+            self.feature_names_.append('BasicRiskScore')
             
-            # Create interaction features for high-risk groups
-            high_risk_mask = X['RiskCategory'].isin(['High', 'VeryHigh'])
-            X.loc[high_risk_mask, 'HighRiskComorbidity'] = (
-                X.loc[high_risk_mask, 'ComorbidityScore'] * 
-                X.loc[high_risk_mask, 'BasicRiskScore']
-            )
+            # Create risk categories using qcut with unique bins
+            try:
+                # Create numeric risk categories (1-5)
+                risk_categories = pd.qcut(
+                    risk_score,
+                    q=5,
+                    labels=False,  # Use numeric labels
+                    duplicates='drop'
+                ) + 1  # Add 1 to make it 1-based instead of 0-based
+            except ValueError as e:
+                # If qcut fails due to too few unique values, use cut instead
+                unique_values = np.unique(risk_score)
+                n_bins = min(5, len(unique_values))
+                risk_categories = pd.cut(
+                    risk_score,
+                    bins=n_bins,
+                    labels=False,  # Use numeric labels
+                    duplicates='drop'
+                ) + 1  # Add 1 to make it 1-based
+            
+            # Add risk categories and handle any NaN values
+            risk_categories = np.nan_to_num(risk_categories, nan=3)  # Use moderate risk (3) for NaN
+            X = np.hstack((X, risk_categories.reshape(-1, 1)))
+            self.feature_names_.append('RiskCategory')
             
             return X
             
         except Exception as e:
             print(f"Error in creating medical scores: {str(e)}")
-            raise
+            # Return original data if score creation fails
+            return X
+
+    def _handle_class_imbalance(self, X, y):
+        """Handle class imbalance with risk-stratified sampling."""
+        try:
+            # Calculate risk scores if not already present
+            if 'BasicRiskScore' not in self.feature_names_:
+                X = self._create_medical_scores(X)
+            
+            # Get risk score index
+            risk_score_idx = self.feature_names_.index('BasicRiskScore')
+            
+            # Create risk strata
+            risk_scores = X[:, risk_score_idx]
+            risk_strata = pd.qcut(risk_scores, q=5, labels=['VL', 'L', 'M', 'H', 'VH'])
+            
+            # Initialize resampled data containers
+            X_resampled_parts = []
+            y_resampled_parts = []
+            
+            # Process each risk stratum separately
+            for stratum in ['VL', 'L', 'M', 'H', 'VH']:
+                stratum_mask = risk_strata == stratum
+                if not np.any(stratum_mask):
+                    continue
+                
+                X_stratum = X[stratum_mask]
+                y_stratum = y[stratum_mask]
+                
+                # Skip if too few samples
+                if len(y_stratum) < 10 or len(np.unique(y_stratum)) < 2:
+                    X_resampled_parts.append(X_stratum)
+                    y_resampled_parts.append(y_stratum)
+                    continue
+                
+                # Calculate sampling ratio based on risk level
+                if stratum in ['VL', 'L']:
+                    sampling_ratio = 0.6  # Less aggressive for low risk
+                elif stratum == 'M':
+                    sampling_ratio = 0.7  # Moderate for medium risk
+                else:
+                    sampling_ratio = 0.8  # More aggressive for high risk
+                
+                try:
+                    # Apply ADASYN with stratum-specific sampling
+                    self.adasyn.sampling_strategy = sampling_ratio
+                    X_resampled, y_resampled = self.adasyn.fit_resample(X_stratum, y_stratum)
+                    
+                    X_resampled_parts.append(X_resampled)
+                    y_resampled_parts.append(y_resampled)
+                    
+                except Exception as e:
+                    print(f"ADASYN failed for {stratum} stratum: {str(e)}")
+                    # Fall back to original data for this stratum
+                    X_resampled_parts.append(X_stratum)
+                    y_resampled_parts.append(y_stratum)
+            
+            # Combine all resampled strata
+            X_resampled = np.vstack(X_resampled_parts)
+            y_resampled = np.hstack(y_resampled_parts)
+            
+            # Shuffle the combined data
+            shuffle_idx = np.random.permutation(len(y_resampled))
+            X_resampled = X_resampled[shuffle_idx]
+            y_resampled = y_resampled[shuffle_idx]
+            
+            print("\nResampling Summary:")
+            print(f"Original class distribution - 0: {sum(y == 0)}, 1: {sum(y == 1)}")
+            print(f"Resampled class distribution - 0: {sum(y_resampled == 0)}, 1: {sum(y_resampled == 1)}")
+            
+            return X_resampled, y_resampled
+            
+        except Exception as e:
+            print(f"Error in class imbalance handling: {str(e)}")
+            return X, y  # Return original data if resampling fails
 
     def _create_clinical_interactions(self, X):
         """Create clinical interaction features."""
         X_new = X.copy()
         
         # Store original values for required features
-        original_values = {col: X_new[col].copy() for col in self.feature_names_ if col in X_new.columns}
+        original_values = {col: X_new[:, self.feature_names_.index(col)].copy() for col in self.feature_names_ if col in self.feature_names_}
         
         # Create interaction terms if features are present
-        if all(col in X_new.columns for col in ['HighBP', 'HighChol']):
-            X_new['BP_Chol'] = X_new['HighBP'] * X_new['HighChol']
+        if all(col in self.feature_names_ for col in ['HighBP', 'HighChol']):
+            X_new = np.hstack((X_new, (X_new[:, self.feature_names_.index('HighBP')] * X_new[:, self.feature_names_.index('HighChol')]).reshape(-1, 1)))
+            self.feature_names_.append('BP_Chol')
         
-        if all(col in X_new.columns for col in ['HeartDiseaseorAttack', 'HighBP']):
-            X_new['Heart_BP'] = X_new['HeartDiseaseorAttack'] * X_new['HighBP']
+        if all(col in self.feature_names_ for col in ['HeartDiseaseorAttack', 'HighBP']):
+            X_new = np.hstack((X_new, (X_new[:, self.feature_names_.index('HeartDiseaseorAttack')] * X_new[:, self.feature_names_.index('HighBP')]).reshape(-1, 1)))
+            self.feature_names_.append('Heart_BP')
         
-        if all(col in X_new.columns for col in ['BMI', 'HighBP']):
-            X_new['BMI_BP'] = X_new['BMI'] * X_new['HighBP']
+        if all(col in self.feature_names_ for col in ['BMI', 'HighBP']):
+            X_new = np.hstack((X_new, (X_new[:, self.feature_names_.index('BMI')] * X_new[:, self.feature_names_.index('HighBP')]).reshape(-1, 1)))
+            self.feature_names_.append('BMI_BP')
         
         # Restore original values
         for col in self.feature_names_:
             if col in original_values:
-                X_new[col] = original_values[col]
+                X_new[:, self.feature_names_.index(col)] = original_values[col]
         
         return X_new
     
-    def _remove_correlated_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Remove highly correlated features efficiently."""
-        # Calculate correlation matrix only for numeric columns
-        numeric_cols = X.select_dtypes(include=[np.number]).columns
-        corr_matrix = X[numeric_cols].corr().abs()
-        
-        # Find features to drop
-        upper = corr_matrix.where(
-            np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
-        )
-        to_drop = [
-            column for column in upper.columns 
-            if any(upper[column] > 0.8)
-        ]
-        
-        # Store and return selected features
-        self.selected_features = [col for col in X.columns if col not in to_drop]
-        return X[self.selected_features]
-    
+    def _remove_correlated_features(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
+        """Remove highly correlated features efficiently while preserving medical relevance."""
+        try:
+            # Define features that should never be dropped due to medical importance
+            critical_features = [
+                'BMI', 'Age', 'HighBP', 'HighChol', 'HeartDiseaseorAttack',
+                'GenHlth', 'BasicRiskScore', 'RiskCategory'
+            ]
+            
+            # Calculate correlation matrix only for numeric columns
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            corr_matrix = X[numeric_cols].corr().abs()
+            
+            # Calculate correlation with target if provided
+            if y is not None:
+                target_corr = pd.Series(
+                    [mutual_info_classif(X[[col]], y, random_state=42)[0] for col in numeric_cols],
+                    index=numeric_cols
+                )
+                print("\nFeature-Target Correlations:")
+                for feat, corr in target_corr.sort_values(ascending=False).items():
+                    print(f"{feat}: {corr:.3f}")
+            
+            # Find features to drop
+            upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+            to_drop = set()
+            correlations_found = []
+            
+            # Iterate through feature pairs with correlation > threshold
+            for i in range(len(upper.columns)):
+                for j in range(i):
+                    corr_value = upper.iloc[j, i]
+                    if corr_value > 0.4:  # Lower correlation threshold
+                        feat1, feat2 = upper.columns[i], upper.columns[j]
+                        correlations_found.append((feat1, feat2, corr_value))
+                        
+                        # Skip if both features are critical
+                        if feat1 in critical_features and feat2 in critical_features:
+                            continue
+                            
+                        # If one feature is critical, drop the other
+                        if feat1 in critical_features:
+                            to_drop.add(feat2)
+                            continue
+                        if feat2 in critical_features:
+                            to_drop.add(feat1)
+                            continue
+                        
+                        # If target correlation is available, keep feature with higher correlation
+                        if y is not None:
+                            if target_corr[feat1] > target_corr[feat2]:
+                                to_drop.add(feat2)
+                            else:
+                                to_drop.add(feat1)
+                        else:
+                            # If no target correlation, keep the first feature
+                            to_drop.add(feat2)
+            
+            # Print correlation findings
+            if correlations_found:
+                print("\nCorrelated Feature Pairs (>0.4):")
+                for feat1, feat2, corr in sorted(correlations_found, key=lambda x: x[2], reverse=True):
+                    status = "kept" if feat1 not in to_drop and feat2 not in to_drop else \
+                            "dropped" if feat1 in to_drop and feat2 in to_drop else \
+                            f"kept {feat1 if feat1 not in to_drop else feat2}"
+                    print(f"{feat1} - {feat2}: {corr:.3f} ({status})")
+            
+            # Store and return selected features
+            self.selected_features = [col for col in X.columns if col not in to_drop]
+            
+            # Print summary
+            print(f"\nFeature Selection Summary:")
+            print(f"Original features: {len(X.columns)}")
+            print(f"Selected features: {len(self.selected_features)}")
+            print(f"Dropped features: {sorted(to_drop)}")
+            
+            return X[self.selected_features]
+            
+        except Exception as e:
+            print(f"Error in removing correlated features: {str(e)}")
+            return X  # Return original data if correlation analysis fails
+
     def _calculate_feature_importance(self, X: pd.DataFrame, y: pd.Series) -> None:
         """Calculate feature importance using Random Forest."""
         rf = RandomForestClassifier(
@@ -420,12 +584,12 @@ class PreProcessor:
         """Detect outliers using LOF."""
         try:
             # Get continuous data
-            continuous_data = X[self.continuous_features].copy()
+            continuous_data = X.copy()
             
             # Handle any remaining missing values
-            for col in continuous_data.columns:
-                if continuous_data[col].isna().any():
-                    continuous_data[col] = continuous_data[col].fillna(continuous_data[col].median())
+            for i in range(continuous_data.shape[1]):
+                if np.isnan(continuous_data[:, i]).any():
+                    continuous_data[:, i] = np.nan_to_num(continuous_data[:, i], nan=np.nanmedian(continuous_data[:, i]))
             
             # Fit and predict outliers
             outlier_labels = self.lof.fit_predict(continuous_data)
@@ -435,59 +599,11 @@ class PreProcessor:
             print(f"Error in outlier detection: {str(e)}")
             return np.zeros(len(X), dtype=bool)  # Return no outliers if detection fails
 
-    def _handle_class_imbalance(self, X, y):
-        """Handle class imbalance with risk-stratified sampling."""
-        try:
-            # Calculate risk scores if not already present
-            if 'BasicRiskScore' not in X.columns:
-                X = self._create_medical_scores(X)
-            
-            # Create risk strata
-            risk_strata = pd.qcut(X['BasicRiskScore'], q=5, labels=['VL', 'L', 'M', 'H', 'VH'])
-            
-            # Initialize resampled data containers
-            X_resampled_parts = []
-            y_resampled_parts = []
-            
-            # Process each risk stratum separately
-            for stratum in risk_strata.unique():
-                stratum_mask = risk_strata == stratum
-                X_stratum = X[stratum_mask]
-                y_stratum = y[stratum_mask]
-                
-                # Skip if no minority class samples in stratum
-                if len(y_stratum.unique()) < 2:
-                    X_resampled_parts.append(X_stratum)
-                    y_resampled_parts.append(y_stratum)
-                    continue
-                
-                # Adjust sampling strategy based on risk level
-                if stratum in ['H', 'VH']:
-                    sampling_ratio = 0.8  # More aggressive sampling for high-risk groups
-                elif stratum == 'M':
-                    sampling_ratio = 0.6  # Moderate sampling for medium risk
-                else:
-                    sampling_ratio = 0.4  # Conservative sampling for low-risk groups
-                
-                # Apply ADASYN with stratum-specific sampling
-                self.adasyn.sampling_strategy = sampling_ratio
-                X_res, y_res = self.adasyn.fit_resample(X_stratum, y_stratum)
-                
-                X_resampled_parts.append(X_res)
-                y_resampled_parts.append(y_res)
-            
-            # Combine resampled data
-            X_resampled = pd.concat(X_resampled_parts, axis=0)
-            y_resampled = pd.concat(y_resampled_parts, axis=0)
-            
-            # Print resampling statistics
-            print("\nResampling Statistics:")
-            print(f"Original class distribution: {pd.Series(y).value_counts().to_dict()}")
-            print(f"Resampled class distribution: {pd.Series(y_resampled).value_counts().to_dict()}")
-            
-            return X_resampled, y_resampled
-            
-        except Exception as e:
-            print(f"Error in class imbalance handling: {str(e)}")
-            # Fallback to original data if resampling fails
-            return X, y
+    def get_feature_names(self):
+        """Get list of feature names after preprocessing."""
+        return [
+            'BMI', 'Age', 'GenHlth', 'MentHlth', 'PhysHlth', 'HighBP', 'HighChol',
+            'Smoker', 'Stroke', 'HeartDiseaseorAttack', 'PhysActivity', 'Fruits',
+            'Veggies', 'HvyAlcoholConsump', 'AnyHealthcare', 'NoDocbcCost', 'DiffWalk',
+            'Education', 'Income', 'BasicRiskScore', 'RiskCategory'
+        ]

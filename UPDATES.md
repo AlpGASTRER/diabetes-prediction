@@ -2,6 +2,52 @@
 
 ## Latest Changes (Most Recent First)
 
+### 2024-03-22: Model Parameter Optimization for Balanced Performance
+
+#### Model Architecture Improvements
+- **Threshold Adjustments**:
+  - Screening threshold increased to 0.12 (from 0.08)
+  - Confirmation threshold increased to 0.15 (from 0.10)
+  - Better balance between false positives and false negatives
+
+- **Enhanced Model Parameters**:
+  - Increased `n_estimators` to 500 for better convergence
+  - Reduced `learning_rate` to 0.03 for improved generalization
+  - Optimized `max_depth` to 8 for balanced model complexity
+  - Adjusted `scale_pos_weight` to 6 for more balanced predictions
+  - Increased sampling rates to 0.85 for better stability
+  - Fine-tuned tree-specific parameters for robustness
+
+- **Sampling Strategy Optimization**:
+  - Modified SMOTE sampling strategy from 1.0 to 0.5
+  - Increased k_neighbors in SMOTE from 3 to 5
+  - Consistent sampling parameters across stages
+
+- **Calibration Enhancements**:
+  - Increased calibration models to 25 (from 20)
+  - Increased Monte Carlo iterations to 35 (from 30)
+
+#### Expected Improvements
+1. **Better Balance**:
+   - More balanced precision-recall trade-off
+   - Improved handling of minority class
+   - Reduced false positive rate while maintaining sensitivity
+
+2. **Model Robustness**:
+   - Better generalization through reduced learning rate
+   - More stable predictions with increased ensemble size
+   - Improved synthetic sample quality
+
+3. **Uncertainty Estimation**:
+   - More reliable uncertainty estimates
+   - Better calibrated probabilities
+   - Enhanced confidence scoring
+
+#### Next Steps
+1. Evaluate model performance with new parameters
+2. Fine-tune thresholds based on results
+3. Consider additional feature engineering if needed
+
 ### 2024-03-21: Model Performance Analysis and Interactive Visualization
 
 #### Performance Metrics Review
@@ -362,87 +408,177 @@ These improvements ensure:
 
 These updates improve the robustness of the preprocessing pipeline and ensure consistent behavior across different data scenarios.
 
-### 2024-01-21: Random State and Reproducibility Update
-- Added consistent random state (42) across all stochastic components:
-  - Global random seeds for numpy, Python's random, and PyTorch
-  - Model initialization seeds for XGBoost, LightGBM, and CatBoost
-  - Data splitting operations (train_test_split, StratifiedShuffleSplit)
-  - ADASYN sampling in preprocessor
-- Removed unsupported random_state from CalibratedClassifierCV
+### 2024-01-07: Improved Two-Stage Model Architecture
+
+### Enhanced Model Training Strategy
+- Modified the two-stage model architecture to maximize learning from all available data:
+  - Both screening and confirmation models now train on the complete dataset
+  - Removed previous limitation where confirmation stage only trained on screened samples
+  - Maintained distinct roles through different thresholds rather than data filtering
+
+### Balanced Learning Improvements
+- Standardized SMOTE application across both stages:
+  - Consistent sampling_strategy=0.5 for both screening and confirmation
+  - Both stages now benefit from balanced class distributions during training
+  - Equal k_neighbors=5 setting for consistent synthetic sample quality
+  - Maintained random_state=42 for reproducibility
+
+### Benefits of New Architecture
+- More robust model training:
+  - Both stages have access to complete data patterns
+  - No information loss from premature filtering
+  - Better pattern recognition across the full dataset
+  - Maintained model specialization through thresholds rather than data subsetting
+
+### Technical Implementation
+- Removed conditional training in confirmation stage
+- Simplified training pipeline with consistent SMOTE application
+- Maintained calibration approach for uncertainty estimation
+- Preserved ensemble structure with LightGBM, XGBoost, and CatBoost
+
+This update represents a significant improvement in our model's architecture, allowing both stages to learn from all available data while maintaining their specialized roles in the prediction pipeline.
+
+### 2024-01-07: Enhanced Model Evaluation and Test Set Balancing
+
+### Test Set Balancing
+- Implemented balanced test set creation while maintaining original distribution in training data
+- Added `create_balanced_test_set` function that ensures:
+  - Equal representation of diabetic and non-diabetic cases in test set
+  - Preserves real-world class distribution in training set
+  - Prevents over-extraction from minority class
+  - Maintains reproducibility with consistent random state
+
+### Enhanced Evaluation Metrics
+- Added comprehensive evaluation metrics to better assess model performance:
+  - Balanced accuracy score (normalized by class size)
+  - Weighted versions of precision, recall, and F1 score
+  - Class distribution information in test set
+- Updated metrics output to show:
+  - Test set class distribution
+  - Both standard and weighted metrics for each model stage
+  - Clear separation between screening and confirmation metrics
+
+### Benefits
+- More reliable model evaluation on balanced test set
+- Better understanding of model performance across both classes
+- Maintained real-world training conditions while ensuring fair testing
+- Enhanced visibility into model behavior through comprehensive metrics
+
+### 2024-01-07: Enhanced Ensemble Prediction Strategy
+
+### Advanced Model Collaboration
+- Implemented sophisticated ensemble prediction combining three strategies:
+  1. **Dynamic Performance-Based Weights**
+     - Weights adapt based on each model's ROC-AUC score
+     - Models that perform better get higher influence
+     - Separate weights for screening and confirmation stages
+  
+  2. **Range-Specific Weighting**
+     - Different weights for different prediction ranges:
+       - Very low risk (0.0-0.2)
+       - Low risk (0.2-0.4)
+       - Medium risk (0.4-0.6)
+       - High risk (0.6-0.8)
+       - Very high risk (0.8-1.0)
+     - Models get higher weights in ranges where they excel
+     - Helps handle different risk levels more accurately
+
+  3. **Adaptive Voting System**
+     - Uses weighted averaging for low uncertainty predictions
+     - Switches to majority voting for high uncertainty cases (>0.2)
+     - Provides more robust predictions when models disagree
+
+### Weight Calculation
+- Combined weighting scheme:
+  - 70% based on overall model performance
+  - 30% based on range-specific performance
+  - Weights normalized to ensure proper probability distribution
+  - Updated separately for screening and confirmation stages
+
+### Technical Improvements
+- Added performance tracking during training:
+  - Overall ROC-AUC scores for each model
+  - Range-specific performance metrics
+  - Uncertainty monitoring across prediction ranges
+- Enhanced model collaboration:
+  - LightGBM, XGBoost, and CatBoost now work together more effectively
+  - Each model contributes based on its strengths
+  - System adapts to model performance in different scenarios
+
+### Benefits
+1. **More Reliable Predictions**
+   - Better handling of edge cases
+   - Reduced impact of individual model weaknesses
+   - Improved confidence in high-uncertainty regions
+
+2. **Better Risk Assessment**
+   - More accurate predictions in different risk ranges
+   - Clearer indication when models disagree
+   - More reliable uncertainty estimates
+
+3. **Clinical Relevance**
+   - Different strategies for different risk levels
+   - More conservative approach in high-uncertainty cases
+   - Better support for medical decision-making
+
+This update represents a significant advancement in how our models collaborate to make predictions, making the system more robust and clinically relevant.
+
+### 2024-01-21: Probability Calibration Improvements
+
+### Added
+- New visualization tools in `visualization.py`:
+  - Enhanced calibration curve plotting
+  - Probability distribution visualization for each class
+- Probability calibration using isotonic regression to improve Brier Score
+- Additional metrics reporting for model calibration
+
+### Modified
+- Updated `main.py` to include probability calibration step
+- Enhanced model evaluation with both initial and calibrated Brier Scores
+- Improved visualization module with more detailed probability analysis tools
+
+### Technical Details
+- Added `CalibratedClassifierCV` with isotonic regression for better probability estimates
+- Enhanced probability metrics reporting
+- Added new visualization functions:
+  - `plot_calibration_curve`: Shows reliability of probability predictions
+  - `plot_probability_distribution`: Displays distribution of predicted probabilities by class
+
+### 2024-01-XX: Enhanced Model Evaluation and Visualization
+
+### Changes Made
+1. **Improved Metrics Visualization**
+   - Added comprehensive metrics summary visualization showing:
+     - Basic classification metrics (accuracy, precision, recall, F1)
+     - Calibration metrics (Brier score, log loss)
+     - ROC curve with AUC score
+     - Precision-Recall curve with average precision
+   - Created detailed calibration analysis plots:
+     - Reliability diagram showing probability calibration
+     - Prediction distribution histogram
+   - Enhanced feature importance visualization with:
+     - More readable feature names
+     - Error bars showing variation across models
+     - Value labels for easier interpretation
+
+2. **Model Performance Updates**
+   - Improved probability calibration (lower Brier score)
+   - Better uncertainty quantification
+   - More reliable probability estimates
+   - Trade-off between raw accuracy and calibration quality
+
+### Technical Details
+- Updated `visualization.py` with new plotting functions:
+  - `plot_metrics_summary`: Comprehensive 4-panel metrics visualization
+  - `plot_calibration_analysis`: Detailed probability calibration analysis
+- Modified `main.py` to incorporate new visualizations in the training pipeline
+- Enhanced feature name mapping for better interpretability
 
 ### Next Steps
-- Monitor synthetic sample quality through clinical validation
-- Consider adjusting ADASYN parameters based on model performance:
-  - sampling_strategy ratio
-  - neighborhood size
-  - synthetic sample validation criteria
-
-### Uncertainty Estimation Enhancements
-
-### Comprehensive Uncertainty Metrics
-- Implemented multiple uncertainty types:
-  - **Epistemic Uncertainty**: Model uncertainty, captured through ensemble variance
-  - **Aleatoric Uncertainty**: Data uncertainty, estimated from prediction probabilities
-  - **Total Uncertainty**: Combined uncertainty using predictive entropy
-  - **Stage-specific Confidence**: Separate confidence scores for screening and confirmation stages
-
-### Monte Carlo Dropout Integration
-- Added Monte Carlo dropout with 10 iterations for robust uncertainty estimation
-- Increased number of calibration models from 3 to 5 for better uncertainty coverage
-- Each prediction now comes with detailed uncertainty breakdown
-
-### Model Calibration Improvements
-- Using sigmoid calibration for reliable probability estimates
-- Multiple calibrated versions of each model in ensemble
-- Separate calibration for screening and confirmation stages
-- Weighted ensemble predictions based on model performance
-
-### Clinical Decision Support
-- Two-stage prediction process with balanced thresholds:
-  1. **Screening Stage** (threshold: 0.2)
-     - Lowered threshold to maximize recall
-     - Ensures we catch more potential diabetes cases
-     - Reduces risk of false negatives in initial screening
-  2. **Confirmation Stage** (threshold: 0.6)
-     - Balanced threshold for precision-recall trade-off
-     - More realistic for clinical decision making
-     - Still maintains high confidence requirement for positive predictions
-
-### Threshold Optimization
-- Previous thresholds (0.3, 0.7) were found to be too conservative
-- New thresholds (0.2, 0.6) provide better balance:
-  - Screening: Catches more potential cases for further evaluation
-  - Confirmation: Better reflects real-world diagnostic confidence levels
-- Each stage includes confidence scores to support clinical decisions
-- Uncertainty estimates help identify borderline cases needing additional tests
-
-### Enhanced Confidence Score Calculation (Latest Update)
-
-### Confidence Score Improvements
-- Implemented a more sophisticated confidence score that combines model uncertainty and prediction strength
-- Added risk level categorization for easier interpretation of prediction reliability
-
-#### New Confidence Score Components
-1. **Model Certainty (70% weight)**
-   - Based on 1 - uncertainty score
-   - Reflects the model's internal confidence in its prediction
-
-2. **Decision Distance (30% weight)**
-   - Measures how far the prediction probability is from the decision threshold (0.6)
-   - Normalized to [0, 1] range
-   - Higher scores for predictions further from the decision boundary
-
-#### Risk Level Categories
-Predictions are now categorized into four confidence levels:
-- **Low Confidence** (0-0.3): High uncertainty or borderline predictions
-- **Medium Confidence** (0.3-0.6): Moderate certainty in predictions
-- **High Confidence** (0.6-0.8): Strong certainty in predictions
-- **Very High Confidence** (0.8-1.0): Highest certainty, ideal for clinical decision support
-
-This enhancement provides clinicians with:
-- More nuanced understanding of prediction reliability
-- Clear categorization for risk-based decision making
-- Better identification of cases requiring additional clinical review
+- Monitor model performance with new metrics
+- Fine-tune probability calibration if needed
+- Consider adding model explainability features
+- Prepare for potential deployment
 
 ### Current Project Structure
 ```
@@ -541,3 +677,158 @@ diabetes-prediction/
 
 ---
 Note: This file will be continuously updated as new changes are made to the project.
+
+### Diabetes Prediction Model Updates
+
+## Latest Updates (2024)
+
+### Recent Changes and Fixes
+
+1. **Test Mode Improvements**
+   - Reduced test dataset size to 1% for faster testing
+   - Added lightweight model parameters for test mode
+   - Fixed feature consistency issues between training and prediction
+   - Improved missing value handling in preprocessor
+
+2. **Preprocessor Enhancements**
+   - Added proper feature name tracking during fit_transform
+   - Improved missing value handling with appropriate defaults for each feature type
+   - Fixed feature count mismatch issues between training and prediction
+   - Added validation for required columns
+
+3. **Model Architecture**
+   - Implemented two-stage ensemble model (screening and confirmation)
+   - Added model calibration for better probability estimates
+   - Integrated uncertainty estimation
+   - Added feature importance tracking
+
+### Known Issues and TODOs
+
+1. **Performance**
+   - [ ] Model calibration is computationally expensive
+   - [ ] SMOTE oversampling slows down training
+   - [ ] Need to optimize feature selection process
+
+2. **Features**
+   - [ ] Add feature importance visualization
+   - [ ] Implement cross-validation for more robust evaluation
+   - [ ] Add model interpretability tools (SHAP values)
+   - [ ] Create interactive dashboard for predictions
+
+3. **Testing**
+   - [ ] Add unit tests for core components
+   - [ ] Create integration tests
+   - [ ] Add performance benchmarks
+
+### Project Structure
+
+```
+diabetes-prediction/
+├── src/
+│   ├── main.py            # Main training and prediction pipeline
+│   ├── preprocessor.py    # Data preprocessing and feature engineering
+│   ├── ensemble_model.py  # Two-stage ensemble model implementation
+│   ├── visualization.py   # Plotting and visualization utilities
+│   └── predict_example.py # Example prediction script
+├── models/                # Saved model files
+├── metrics/              # Performance metrics and logs
+└── data/                 # Dataset directory
+```
+
+### Model Components
+
+1. **Preprocessor**
+   - Feature validation and cleaning
+   - Missing value imputation
+   - Feature scaling
+   - Outlier detection
+   - Feature engineering
+
+2. **Ensemble Model**
+   - First stage: Screening model (high recall)
+   - Second stage: Confirmation model (high precision)
+   - Model calibration
+   - Uncertainty estimation
+   - Feature importance analysis
+
+3. **Visualization**
+   - Performance metrics plots
+   - ROC and PR curves
+   - Calibration plots
+   - Feature importance charts
+
+### Dependencies
+
+- scikit-learn
+- pandas
+- numpy
+- xgboost
+- lightgbm
+- catboost
+- imbalanced-learn
+- matplotlib
+- seaborn
+
+### Usage Instructions
+
+1. **Training**
+   ```bash
+   python src/main.py --mode train --data path/to/data.csv --visualize
+   ```
+
+2. **Testing**
+   ```bash
+   python src/main.py --mode test
+   ```
+
+3. **Prediction**
+   ```bash
+   python src/main.py --mode predict --data path/to/predict.csv
+   ```
+
+### Performance Metrics
+
+1. **Screening Stage**
+   - Optimized for high recall
+   - Current metrics:
+     - Accuracy: ~0.69
+     - Balanced Accuracy: ~0.71
+     - Recall: ~0.73
+     - F1 Score: ~0.39
+
+2. **Confirmation Stage**
+   - Optimized for high precision
+   - Current metrics:
+     - Accuracy: ~0.73
+     - Balanced Accuracy: ~0.70
+     - Precision: ~0.28
+     - F1 Score: ~0.40
+
+3. **Overall Performance**
+   - ROC AUC: ~0.78
+   - Average Precision: ~0.35
+   - Brier Score: ~0.10
+
+### Future Improvements
+
+1. **Model Enhancement**
+   - Implement stacking with neural networks
+   - Add time-series features for longitudinal data
+   - Explore deep learning approaches
+
+2. **Feature Engineering**
+   - Add interaction terms
+   - Implement polynomial features
+   - Add domain-specific medical features
+
+3. **Production Readiness**
+   - Add API endpoints
+   - Implement model versioning
+   - Add monitoring and logging
+   - Create Docker container
+
+4. **Documentation**
+   - Add detailed API documentation
+   - Create user guide
+   - Add contribution guidelines
+   - Add acknowledgments for data sources and libraries

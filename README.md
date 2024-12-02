@@ -29,13 +29,30 @@ The dataset contains health indicators that may be used to predict diabetes, col
 - Robust scaling with proper dtype handling
 
 ### Model Architecture
-- Two-stage ensemble prediction
-- Multiple calibrated models for robustness
-- Uncertainty estimation via:
-  - Monte Carlo dropout
-  - Model variance
-  - Ensemble disagreement
-- Comprehensive uncertainty calibration
+- Two-stage ensemble prediction:
+  - Screening stage (threshold: 0.12)
+  - Confirmation stage (threshold: 0.15)
+- Multiple base models:
+  - LightGBM (500 estimators)
+  - XGBoost (500 estimators)
+  - CatBoost (500 estimators)
+- Advanced parameter tuning:
+  - Low learning rate (0.03) for better generalization
+  - Balanced tree depth (8) for optimal complexity
+  - Adjusted class weights for imbalance handling
+- Comprehensive uncertainty estimation:
+  - Monte Carlo dropout (35 iterations)
+  - Model variance analysis
+  - Ensemble disagreement metrics
+  - 25 calibration models per stage
+
+### Sampling Strategy
+- SMOTE for minority class oversampling:
+  - Balanced sampling ratio (0.5)
+  - Robust neighbor selection (k=5)
+  - Stage-specific sampling parameters
+- Feature-aware synthetic sample generation
+- Consistent sampling across model stages
 
 ### Visualization Tools
 - Interactive dashboards using Plotly
