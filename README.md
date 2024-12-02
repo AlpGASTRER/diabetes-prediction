@@ -44,6 +44,20 @@ The dataset contains health indicators that may be used to predict diabetes, col
 - Model calibration curves
 - Performance metrics visualization
 
+## Reproducibility
+
+The model uses a fixed random state (42) across all stochastic components to ensure reproducible results:
+- All random number generators (numpy, Python's random, PyTorch)
+- Model initialization (XGBoost, LightGBM, CatBoost)
+- Data splitting and sampling operations
+- ADASYN synthetic sampling
+
+To maintain reproducibility:
+1. Do not modify the random state settings in the code
+2. Use the same Python environment and package versions
+3. Process the data in the same order
+4. Run on the same hardware architecture when possible
+
 ## Installation
 
 1. Create and activate conda environment:

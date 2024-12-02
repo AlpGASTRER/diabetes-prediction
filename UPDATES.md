@@ -222,9 +222,12 @@ These improvements ensure:
 
 ### ADASYN Configuration
 - Set sampling_strategy to 0.75 to maintain some natural class imbalance while improving minority class representation
-- Using smaller neighborhood (n_neighbors=5) for more precise synthetic sample generation
-- Enabled parallel processing with n_jobs=-1 for better performance
-- Added fallback mechanism to handle potential ADASYN failures gracefully
+- Using 5 nearest neighbors for synthetic sample generation
+- Improved handling of feature spaces
+- Added detailed class distribution reporting:
+  - Pre-resampling distribution
+  - Post-resampling distribution
+  - Percentage breakdowns
 
 ### Data Validation and Cleaning
 - Improved duplicate handling:
@@ -358,6 +361,14 @@ These improvements ensure:
    - Added proper data copying to prevent unintended modifications
 
 These updates improve the robustness of the preprocessing pipeline and ensure consistent behavior across different data scenarios.
+
+### 2024-01-21: Random State and Reproducibility Update
+- Added consistent random state (42) across all stochastic components:
+  - Global random seeds for numpy, Python's random, and PyTorch
+  - Model initialization seeds for XGBoost, LightGBM, and CatBoost
+  - Data splitting operations (train_test_split, StratifiedShuffleSplit)
+  - ADASYN sampling in preprocessor
+- Removed unsupported random_state from CalibratedClassifierCV
 
 ### Next Steps
 - Monitor synthetic sample quality through clinical validation

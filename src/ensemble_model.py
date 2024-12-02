@@ -17,22 +17,11 @@ class DiabetesEnsemblePredictor:
     """Two-stage ensemble model for diabetes prediction with uncertainty estimation"""
     
     def __init__(self, 
-                 screening_threshold: float = 0.15,  # Lowered to more stable region
-                 confirmation_threshold: float = 0.25,  # Further lowered based on test results
-                 n_calibration_models: int = 15,  # Increased for better uncertainty estimation
-                 mc_iterations: int = 20):  # Increased for more stable MC dropout
-        """Initialize the ensemble predictor.
-        
-        Args:
-            screening_threshold: Threshold for screening stage (default: 0.15)
-                Lowered to more stable region
-            confirmation_threshold: Threshold for confirmation stage (default: 0.25)
-                Further lowered based on test results
-            n_calibration_models: Number of calibrated models for uncertainty (default: 15)
-                Increased for better uncertainty estimation
-            mc_iterations: Number of Monte Carlo iterations for uncertainty (default: 20)
-                Increased for more stable MC dropout
-        """
+                 screening_threshold: float = 0.15,  # Kept at 0.15 for good recall
+                 confirmation_threshold: float = 0.20,  # Lowered further to improve recall
+                 n_calibration_models: int = 15,
+                 mc_iterations: int = 20):
+        """Initialize the ensemble predictor."""
         self.screening_threshold = screening_threshold
         self.confirmation_threshold = confirmation_threshold
         self.n_calibration_models = n_calibration_models
@@ -51,7 +40,7 @@ class DiabetesEnsemblePredictor:
         self.is_fitted = False
     
     def _create_base_models(self, stage: str) -> Dict:
-        """Create base models for the ensemble."""
+        """Create base models for the ensemble with balanced parameters."""
         if stage == 'screening':
             models = {
                 'lgb': lgb.LGBMClassifier(
@@ -59,16 +48,15 @@ class DiabetesEnsemblePredictor:
                     learning_rate=0.1,
                     num_leaves=127,
                     max_depth=8,
-                    min_child_samples=100,
-                    min_split_gain=1e-2,
+                    min_child_samples=30,  # Further reduced to capture more patterns
+                    min_split_gain=1e-4,   # Reduced for even finer splits
                     subsample=0.8,
                     feature_fraction=0.8,
-                    class_weight='balanced',
-                    scale_pos_weight=3,  # Balanced weight for stability
+                    scale_pos_weight=5,    # Increased weight for minority class
                     force_row_wise=True,
                     random_state=42,
                     boosting_type='gbdt',
-                    data_sample_strategy='goss',
+                    data_sample_strategy='goss',  # Gradient-based sampling
                     verbose=-1,
                     n_jobs=-1
                 ),
@@ -76,11 +64,11 @@ class DiabetesEnsemblePredictor:
                     n_estimators=200,
                     learning_rate=0.1,
                     max_depth=8,
-                    min_child_weight=100,
-                    gamma=0.1,
+                    min_child_weight=30,   # Further reduced
+                    gamma=0.03,            # Reduced for finer splits
                     subsample=0.8,
                     colsample_bytree=0.8,
-                    scale_pos_weight=6,  # Moderate weight
+                    scale_pos_weight=5,    # Increased weight for minority class
                     tree_method='hist',
                     grow_policy='lossguide',
                     random_state=42,
@@ -90,30 +78,28 @@ class DiabetesEnsemblePredictor:
                     iterations=200,
                     learning_rate=0.1,
                     depth=8,
-                    min_data_in_leaf=100,
-                    l2_leaf_reg=3,
+                    min_data_in_leaf=30,  # Reduced for better minority class detection
+                    l2_leaf_reg=2,  # Reduced for more flexible model
                     bootstrap_type='Bernoulli',
                     subsample=0.8,
-                    class_weights=[1, 6],  # Moderate weight
+                    class_weights=[1, 5],  # Increased weight for minority class
                     random_seed=42,
                     verbose=False,
                     thread_count=-1
                 )
             }
-        else:  # confirmation stage
+        else:  # Confirmation stage
             models = {
                 'lgb': lgb.LGBMClassifier(
-                    n_estimators=150,
-                    learning_rate=0.1,
-                    num_leaves=63,
+                    n_estimators=300,
+                    learning_rate=0.05,
+                    num_leaves=63,  # Reduced for more generalization
                     max_depth=6,
-                    min_child_samples=50,
-                    subsample=0.8,
-                    feature_fraction=0.8,
-                    class_weight='balanced',
-                    scale_pos_weight=4,  # Increased weight
-                    reg_alpha=0.1,  # L1 regularization for stability
-                    reg_lambda=0.1,  # L2 regularization for stability
+                    min_child_samples=20,  # Further reduced for confirmation stage
+                    min_split_gain=1e-4,   # Reduced for even finer splits
+                    subsample=0.7,
+                    feature_fraction=0.7,
+                    scale_pos_weight=5,    # Increased weight for minority class
                     force_row_wise=True,
                     random_state=42,
                     boosting_type='gbdt',
@@ -122,30 +108,28 @@ class DiabetesEnsemblePredictor:
                     n_jobs=-1
                 ),
                 'xgb': xgb.XGBClassifier(
-                    n_estimators=150,
-                    learning_rate=0.1,
+                    n_estimators=300,
+                    learning_rate=0.05,
                     max_depth=6,
-                    min_child_weight=50,
-                    gamma=0.2,
-                    subsample=0.8,
-                    colsample_bytree=0.8,
-                    scale_pos_weight=6,  # Increased weight
-                    reg_alpha=0.1,  # Added regularization
-                    reg_lambda=0.1,
+                    min_child_weight=20,
+                    gamma=0.02,
+                    subsample=0.7,
+                    colsample_bytree=0.7,
+                    scale_pos_weight=5,
                     tree_method='hist',
                     grow_policy='lossguide',
                     random_state=42,
                     n_jobs=-1
                 ),
                 'cat': CatBoostClassifier(
-                    iterations=150,
-                    learning_rate=0.1,
+                    iterations=300,
+                    learning_rate=0.05,
                     depth=6,
-                    min_data_in_leaf=50,
-                    l2_leaf_reg=5,
+                    min_data_in_leaf=20,
+                    l2_leaf_reg=2,
                     bootstrap_type='Bernoulli',
-                    subsample=0.8,
-                    class_weights=[1, 6],  # Increased weight
+                    subsample=0.7,
+                    class_weights=[1, 5],
                     random_seed=42,
                     verbose=False,
                     thread_count=-1
@@ -219,7 +203,7 @@ class DiabetesEnsemblePredictor:
             print(f"Class distribution before SMOTE - 0: {sum(y_confirm == 0)}, 1: {sum(y_confirm == 1)}")
             
             # Apply SMOTE with more aggressive sampling for confirmation
-            smote_confirm = SMOTE(random_state=42, sampling_strategy=0.7)
+            smote_confirm = SMOTE(random_state=42, sampling_strategy=0.9)
             try:
                 X_confirm_res, y_confirm_res = smote_confirm.fit_resample(X_confirm, y_confirm)
                 print(f"After SMOTE - X: {X_confirm_res.shape}, y: {y_confirm_res.shape}")

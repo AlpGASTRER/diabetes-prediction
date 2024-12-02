@@ -50,9 +50,9 @@ class PreProcessor:
             n_jobs=-1
         )
         self.adasyn = ADASYN(
-            sampling_strategy=0.5,  # Conservative ratio for large dataset
+            sampling_strategy='auto',  # Will be adjusted dynamically
             random_state=42,
-            n_neighbors=10,  # More neighbors for better density estimation
+            n_neighbors=15,  # Increased for better density estimation
             n_jobs=-1
         )
         
@@ -296,37 +296,65 @@ class PreProcessor:
             return X  # Return original data if outlier detection fails
 
     def _create_medical_scores(self, X):
-        """Create medical risk scores."""
-        X_new = X.copy()
-        
-        # Store original values for required features
-        original_values = {col: X_new[col].copy() for col in self.feature_names_ if col in X_new.columns}
-        
-        # Create BMI categories
-        if 'BMI' in X_new.columns:
-            X_new['BMI_Category'] = pd.cut(
-                X_new['BMI'],
-                bins=[-float('inf'), 18.5, 25, 30, float('inf')],
-                labels=['Underweight', 'Normal', 'Overweight', 'Obese']
+        """Create medical risk scores with stratification."""
+        try:
+            # Basic medical risk score (weighted sum of key risk factors)
+            risk_weights = {
+                'BMI': 0.3,
+                'Age': 0.2,
+                'HighBP': 0.15,
+                'HighChol': 0.15,
+                'HeartDiseaseorAttack': 0.2
+            }
+            
+            # Create age groups for stratification
+            X['AgeGroup'] = pd.cut(X['Age'], 
+                                 bins=[0, 35, 45, 55, 65, 100],
+                                 labels=['<35', '35-45', '45-55', '55-65', '>65'])
+            
+            # Calculate BMI categories
+            X['BMICategory'] = pd.cut(X['BMI'],
+                                    bins=[0, 18.5, 25, 30, 35, 100],
+                                    labels=['Underweight', 'Normal', 'Overweight', 'Obese', 'SeverelyObese'])
+            
+            # Calculate basic risk score
+            risk_score = sum(X[col] * weight for col, weight in risk_weights.items())
+            X['BasicRiskScore'] = risk_score
+            
+            # Create comorbidity score
+            comorbidity_factors = ['HighBP', 'HighChol', 'HeartDiseaseorAttack', 'Stroke']
+            X['ComorbidityScore'] = X[comorbidity_factors].sum(axis=1)
+            
+            # Create lifestyle score (inverse scoring for positive factors)
+            X['LifestyleScore'] = (
+                (1 - X['PhysActivity']) * 0.4 +
+                (1 - X['Fruits']) * 0.2 +
+                (1 - X['Veggies']) * 0.2 +
+                X['Smoker'] * 0.2
             )
-        
-        # Create Age groups
-        if 'Age' in X_new.columns:
-            X_new['Age_Group'] = pd.cut(
-                X_new['Age'],
-                bins=[-float('inf'), 35, 50, 65, float('inf')],
-                labels=['Young', 'Middle', 'Senior', 'Elderly']
+            
+            # Create healthcare access score
+            X['HealthcareAccessScore'] = (
+                X['AnyHealthcare'] * 0.6 +
+                (1 - X['NoDocbcCost']) * 0.4
             )
-        
-        # Convert categories to dummy variables
-        X_new = pd.get_dummies(X_new, columns=['BMI_Category', 'Age_Group'])
-        
-        # Restore original values
-        for col in self.feature_names_:
-            if col in original_values:
-                X_new[col] = original_values[col]
-        
-        return X_new
+            
+            # Create composite risk categories
+            X['RiskCategory'] = pd.qcut(X['BasicRiskScore'], q=5, 
+                                      labels=['VeryLow', 'Low', 'Moderate', 'High', 'VeryHigh'])
+            
+            # Create interaction features for high-risk groups
+            high_risk_mask = X['RiskCategory'].isin(['High', 'VeryHigh'])
+            X.loc[high_risk_mask, 'HighRiskComorbidity'] = (
+                X.loc[high_risk_mask, 'ComorbidityScore'] * 
+                X.loc[high_risk_mask, 'BasicRiskScore']
+            )
+            
+            return X
+            
+        except Exception as e:
+            print(f"Error in creating medical scores: {str(e)}")
+            raise
 
     def _create_clinical_interactions(self, X):
         """Create clinical interaction features."""
@@ -406,3 +434,60 @@ class PreProcessor:
         except Exception as e:
             print(f"Error in outlier detection: {str(e)}")
             return np.zeros(len(X), dtype=bool)  # Return no outliers if detection fails
+
+    def _handle_class_imbalance(self, X, y):
+        """Handle class imbalance with risk-stratified sampling."""
+        try:
+            # Calculate risk scores if not already present
+            if 'BasicRiskScore' not in X.columns:
+                X = self._create_medical_scores(X)
+            
+            # Create risk strata
+            risk_strata = pd.qcut(X['BasicRiskScore'], q=5, labels=['VL', 'L', 'M', 'H', 'VH'])
+            
+            # Initialize resampled data containers
+            X_resampled_parts = []
+            y_resampled_parts = []
+            
+            # Process each risk stratum separately
+            for stratum in risk_strata.unique():
+                stratum_mask = risk_strata == stratum
+                X_stratum = X[stratum_mask]
+                y_stratum = y[stratum_mask]
+                
+                # Skip if no minority class samples in stratum
+                if len(y_stratum.unique()) < 2:
+                    X_resampled_parts.append(X_stratum)
+                    y_resampled_parts.append(y_stratum)
+                    continue
+                
+                # Adjust sampling strategy based on risk level
+                if stratum in ['H', 'VH']:
+                    sampling_ratio = 0.8  # More aggressive sampling for high-risk groups
+                elif stratum == 'M':
+                    sampling_ratio = 0.6  # Moderate sampling for medium risk
+                else:
+                    sampling_ratio = 0.4  # Conservative sampling for low-risk groups
+                
+                # Apply ADASYN with stratum-specific sampling
+                self.adasyn.sampling_strategy = sampling_ratio
+                X_res, y_res = self.adasyn.fit_resample(X_stratum, y_stratum)
+                
+                X_resampled_parts.append(X_res)
+                y_resampled_parts.append(y_res)
+            
+            # Combine resampled data
+            X_resampled = pd.concat(X_resampled_parts, axis=0)
+            y_resampled = pd.concat(y_resampled_parts, axis=0)
+            
+            # Print resampling statistics
+            print("\nResampling Statistics:")
+            print(f"Original class distribution: {pd.Series(y).value_counts().to_dict()}")
+            print(f"Resampled class distribution: {pd.Series(y_resampled).value_counts().to_dict()}")
+            
+            return X_resampled, y_resampled
+            
+        except Exception as e:
+            print(f"Error in class imbalance handling: {str(e)}")
+            # Fallback to original data if resampling fails
+            return X, y

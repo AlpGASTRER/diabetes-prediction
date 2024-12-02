@@ -117,12 +117,14 @@ def train_model(data_path: str, visualize: bool = False, test_mode: bool = False
     
     if test_mode:
         print("\nRunning in test mode with smaller dataset...")
-        # Take a smaller stratified sample
         from sklearn.model_selection import StratifiedShuffleSplit
         sss = StratifiedShuffleSplit(n_splits=1, test_size=0.9, random_state=42)
         for train_idx, _ in sss.split(data, data['Diabetes_binary']):
             data = data.iloc[train_idx]
         print(f"Test dataset size: {len(data)}")
+    
+    # Create metrics directory if it doesn't exist
+    Path('metrics').mkdir(exist_ok=True)
     
     # Split features and target
     X = data.drop('Diabetes_binary', axis=1)
@@ -139,50 +141,52 @@ def train_model(data_path: str, visualize: bool = False, test_mode: bool = False
     print(f"Non-diabetic (0): {sum(y_train == 0)}")
     print(f"Diabetic (1): {sum(y_train == 1)}")
     
-    # Initialize and fit preprocessor
+    # Preprocess data
     print("\nPreprocessing training data...")
     preprocessor = PreProcessor()
-    X_train_proc = preprocessor.fit_transform(X_train)
-    if isinstance(X_train_proc, tuple):
-        X_train_proc = X_train_proc[0]  # Get just the features
+    X_train_processed, y_train = preprocessor.fit_transform(X_train, y_train)
     
     # Save preprocessor
     print("\nSaving preprocessor...")
-    Path('models').mkdir(exist_ok=True)
     joblib.dump(preprocessor, 'models/preprocessor.joblib')
     
-    # Initialize and train model
+    # Train model
     print("\nTraining ensemble model...")
-    thresholds = {'screening': 0.15, 'confirmation': 0.45}
-    model = DiabetesEnsemblePredictor(
-        screening_threshold=thresholds['screening'],
-        confirmation_threshold=thresholds['confirmation']
-    )
-    model.fit(X_train_proc, y_train)
+    model = DiabetesEnsemblePredictor()
+    model.fit(X_train_processed, y_train)
     
     # Save model
     print("\nSaving model...")
     joblib.dump(model, 'models/model.joblib')
     
-    # Evaluate on test set
+    # Preprocess test data
     print("\nEvaluating model...")
-    X_test_proc = preprocessor.transform(X_test)
-    if isinstance(X_test_proc, tuple):
-        X_test_proc = X_test_proc[0]  # Get just the features
-    probas, uncertainties = model.predict_proba(X_test_proc)
+    X_test_processed = preprocessor.transform(X_test)
     
-    # Calculate and save metrics
-    metrics = evaluate_predictions(y_test, probas, uncertainties, thresholds)
+    # Get predictions and uncertainties
+    probas, uncertainties = model.predict_proba(X_test_processed)
     
-    # Print key metrics
+    # Evaluate model
+    metrics = evaluate_predictions(
+        y_test,
+        probas,
+        uncertainties,
+        {'screening': model.screening_threshold, 'confirmation': model.confirmation_threshold}
+    )
+    
+    # Save metrics
+    with open('metrics/metrics.json', 'w') as f:
+        json.dump(metrics, f, indent=4)
+    
+    # Print metrics
     print("\nModel Performance:\n")
-    print("Screening Stage Metrics (Threshold: {:.1f})".format(thresholds['screening']))
+    print("Screening Stage Metrics (Threshold: {:.1f})".format(model.screening_threshold))
     print(f"Accuracy: {metrics['screening_metrics']['accuracy']:.3f}")
     print(f"Precision: {metrics['screening_metrics']['precision']:.3f}")
     print(f"Recall: {metrics['screening_metrics']['recall']:.3f}")
     print(f"F1 Score: {metrics['screening_metrics']['f1']:.3f}\n")
     
-    print("Confirmation Stage Metrics (Threshold: {:.1f})".format(thresholds['confirmation']))
+    print("Confirmation Stage Metrics (Threshold: {:.1f})".format(model.confirmation_threshold))
     print(f"Accuracy: {metrics['confirmation_metrics']['accuracy']:.3f}")
     print(f"Precision: {metrics['confirmation_metrics']['precision']:.3f}")
     print(f"Recall: {metrics['confirmation_metrics']['recall']:.3f}")
@@ -191,46 +195,39 @@ def train_model(data_path: str, visualize: bool = False, test_mode: bool = False
     print("Probability Metrics:")
     print(f"ROC AUC: {metrics['probability_metrics']['roc_auc']:.3f}")
     print(f"Average Precision: {metrics['probability_metrics']['average_precision']:.3f}")
-    print(f"Brier Score: {metrics['probability_metrics']['brier_score']:.3f}")
+    print(f"Brier Score: {metrics['probability_metrics']['brier_score']:.3f}\n")
     
-    # Save metrics
-    Path('metrics').mkdir(exist_ok=True)
-    with open('metrics/evaluation_metrics.json', 'w') as f:
-        json.dump(metrics, f, indent=2)
-    
-    # Create visualizations if requested
     if visualize:
         print("\nGenerating visualizations...")
-        Path('plots').mkdir(exist_ok=True)
+        # Plot feature importance
+        feature_importance = pd.DataFrame({
+            'Feature': preprocessor.get_feature_names(),
+            'Avg_Importance': np.mean([
+                model.models['screening']['lgb'].feature_importances_,
+                model.models['screening']['xgb'].feature_importances_,
+                model.models['confirmation']['lgb'].feature_importances_,
+                model.models['confirmation']['xgb'].feature_importances_
+            ], axis=0),
+            'Std_Importance': np.std([
+                model.models['screening']['lgb'].feature_importances_,
+                model.models['screening']['xgb'].feature_importances_,
+                model.models['confirmation']['lgb'].feature_importances_,
+                model.models['confirmation']['xgb'].feature_importances_
+            ], axis=0)
+        })
+        viz.plot_feature_importance(feature_importance)
         
-        # Feature importance plot
-        viz.plot_feature_importance(preprocessor.get_feature_importance())
-        plt.savefig('plots/feature_importance.png')
-        plt.close()
+        # Plot uncertainty distribution
+        viz.plot_uncertainty_distribution(probas[:, 1], uncertainties)
         
-        # Uncertainty distribution
-        viz.plot_uncertainty_distribution(probas, uncertainties)
-        plt.savefig('plots/uncertainty_distribution.png')
-        plt.close()
+        # Plot calibration curve
+        viz.plot_calibration_curve(y_test, probas[:, 1])
         
-        # Calibration curve
-        viz.plot_calibration_curve(y_test, probas)
-        plt.savefig('plots/calibration_curve.png')
-        plt.close()
+        # Plot class distribution
+        viz.plot_class_distribution(y_train, y_train)
         
-        # Decision boundary
-        viz.plot_decision_boundary(
-            probas, uncertainties,
-            {'screening': 0.3, 'confirmation': 0.7}
-        )
-        plt.savefig('plots/decision_boundary.png')
-        plt.close()
-        
-        # Interactive dashboard
-        viz.create_interactive_dashboard(
-            probas, uncertainties, y_test,
-            {'screening': 0.3, 'confirmation': 0.7}
-        )
+        # Plot metrics summary
+        viz.plot_metrics_summary(metrics)
     
     print("\nTraining complete! Model and preprocessor saved in 'models' directory.")
 

@@ -1,25 +1,25 @@
 {
   "screening_metrics": {
-    "accuracy": 0.7499014584154513,
-    "precision": 0.2547993019197208,
-    "recall": 0.413012729844413,
-    "f1": 0.31516459794927143
+    "accuracy": 0.8200883002207505,
+    "precision": 0.39394251571031214,
+    "recall": 0.5409534587636158,
+    "f1": 0.4558893657606104
   },
   "confirmation_metrics": {
-    "accuracy": 0.8606621994481671,
-    "precision": 0.0,
-    "recall": 0.0,
-    "f1": 0.0
+    "accuracy": 0.8622280037842952,
+    "precision": 0.6695278969957081,
+    "recall": 0.02206818503324374,
+    "f1": 0.04272801972062449
   },
   "probability_metrics": {
-    "roc_auc": 0.7466089538064997,
-    "average_precision": 0.24603865063956834,
-    "brier_score": 0.11330278043611831
+    "roc_auc": 0.8188822742035742,
+    "average_precision": 0.41435187073187074,
+    "brier_score": 0.10332472409319975
   },
   "uncertainty_metrics": {
-    "mean_epistemic": 2.7647540018780534e-17,
-    "mean_aleatoric": 0.11512931278902352,
-    "mean_total": 0.11512931278902357,
-    "correlation_with_error": 0.5270704133937424
+    "mean_epistemic": 2.8888739551312124e-17,
+    "mean_aleatoric": 0.108866805282087,
+    "mean_total": 0.10886680528208702,
+    "correlation_with_error": 0.51696731339585
   }
 }
