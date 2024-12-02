@@ -137,9 +137,9 @@ def predict_diabetes_risk(user_data: Dict) -> Tuple[float, float]:
         return 0.0, 0.0
 
 if __name__ == "__main__":
-    # Example user data (45-year-old with high blood pressure and cholesterol)
+    # Example user data with proper age group (6 = Age 45-49)
     example_user = {
-        'Age': 45,
+        'Age': 6,  # Age group 6 (45-49 years)
         'BMI': 28.5,
         'HighBP': 1,
         'HighChol': 1,
@@ -155,7 +155,9 @@ if __name__ == "__main__":
         'GenHlth': 2,
         'PhysHlth': 3,
         'DiffWalk': 0,
-        'MentHlth': 0
+        'MentHlth': 0,
+        'Education': 4,  # College 1-3 years
+        'Income': 5      # $35,000 to less than $50,000
     }
     
     # Get prediction

@@ -56,13 +56,31 @@ class PreProcessor:
         }
         
         # Define feature groups
-        self.continuous_features = ['BMI', 'PhysHlth', 'MentHlth', 'Age']
+        self.continuous_features = ['BMI', 'PhysHlth', 'MentHlth']  # Removed Age
         self.binary_features = [
             'HighBP', 'HighChol', 'CholCheck', 'Smoker', 'Stroke',
             'HeartDiseaseorAttack', 'PhysActivity', 'Fruits', 'Veggies',
             'HvyAlcoholConsump', 'AnyHealthcare', 'NoDocbcCost', 'DiffWalk'
         ]
-        self.categorical_features = ['GenHlth', 'Education', 'Income']
+        self.categorical_features = ['GenHlth', 'Education', 'Income', 'Age']  # Added Age
+        
+        # BRFSS 2015 Age Groups (1-14)
+        self.age_groups = {
+            1: "Age 18-24",
+            2: "Age 25-29",
+            3: "Age 30-34",
+            4: "Age 35-39",
+            5: "Age 40-44",
+            6: "Age 45-49",
+            7: "Age 50-54",
+            8: "Age 55-59",
+            9: "Age 60-64",
+            10: "Age 65-69",
+            11: "Age 70-74",
+            12: "Age 75-79",
+            13: "Age 80+",
+            14: "Don't know/Refused/Missing"
+        }
         
         # Medical thresholds based on clinical guidelines
         self.medical_thresholds = {
@@ -234,6 +252,8 @@ class PreProcessor:
                 valid_range = range(1, 7)
             elif col == 'Income':
                 valid_range = range(1, 9)
+            elif col == 'Age':
+                valid_range = range(1, 15)  # BRFSS 2015 Age Groups
             else:
                 continue
                 
@@ -267,7 +287,7 @@ class PreProcessor:
         # Fill missing values with appropriate defaults
         defaults = {
             'BMI': X['BMI'].dropna().median(),
-            'Age': X['Age'].dropna().median(),
+            'Age': X['Age'].dropna().mode()[0],  # Use mode for Age
             'GenHlth': X['GenHlth'].dropna().mode()[0],
             'MentHlth': X['MentHlth'].dropna().median(),
             'PhysHlth': X['PhysHlth'].dropna().median(),
@@ -339,10 +359,17 @@ class PreProcessor:
             chol_idx = self.feature_names_.index('HighChol')
             risk_score += (X[:, chol_idx] == 1).astype(int) * 2
             
-            # Age risk (0-3 points)
+            # Age risk (0-3 points) - Using BRFSS age groups
             age_idx = self.feature_names_.index('Age')
-            risk_score += ((X[:, age_idx] >= 45) & (X[:, age_idx] < 65)).astype(int) * 2
-            risk_score += (X[:, age_idx] >= 65).astype(int) * 3
+            age_values = X[:, age_idx].astype(int)
+            
+            # Age 45-54 (groups 6-7): 2 points
+            middle_age_mask = (age_values >= 6) & (age_values <= 7)
+            risk_score += middle_age_mask.astype(int) * 2
+            
+            # Age 55+ (groups 8-13): 3 points
+            older_age_mask = (age_values >= 8) & (age_values <= 13)
+            risk_score += older_age_mask.astype(int) * 3
             
             # Add risk score as new feature
             X = np.hstack((X, risk_score.reshape(-1, 1)))

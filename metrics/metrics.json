@@ -1,34 +1,34 @@
 {
     "screening_metrics": {
-        "accuracy": 0.6903185115105644,
-        "balanced_accuracy": 0.7468183373326616,
-        "precision": 0.2833597046413502,
-        "recall": 0.8246354566385264,
-        "f1": 0.42178606476938174,
-        "weighted_precision": 0.8673715564847777,
-        "weighted_recall": 0.6903185115105644,
-        "weighted_f1": 0.7382962058569003
+        "accuracy": 0.7022232734153264,
+        "balanced_accuracy": 0.7587999631694122,
+        "precision": 0.2938481234418166,
+        "recall": 0.8367229470452802,
+        "f1": 0.4349473894180422,
+        "weighted_precision": 0.8716362379190069,
+        "weighted_recall": 0.7022232734153264,
+        "weighted_f1": 0.748138591375931
     },
     "confirmation_metrics": {
-        "accuracy": 0.7255597603279722,
-        "balanced_accuracy": 0.7439111513484762,
-        "precision": 0.3025888746320477,
-        "recall": 0.7691864927091328,
-        "f1": 0.4343210010291967,
-        "weighted_precision": 0.8626164473552732,
-        "weighted_recall": 0.7255597603279722,
-        "weighted_f1": 0.7661663545108611
+        "accuracy": 0.7344160622306317,
+        "balanced_accuracy": 0.7566285593164094,
+        "precision": 0.313206106870229,
+        "recall": 0.7872217958557176,
+        "f1": 0.4481214504150284,
+        "weighted_precision": 0.8675718865285981,
+        "weighted_recall": 0.7344160622306317,
+        "weighted_f1": 0.7734922647846441
     },
     "probability_metrics": {
-        "roc_auc": 0.8231020036681022,
-        "average_precision": 0.41751373310594625,
-        "brier_score": 0.09685703225389805
+        "roc_auc": 0.8341222308118714,
+        "average_precision": 0.4299628427207442,
+        "brier_score": 0.09528633026541097
     },
     "uncertainty_metrics": {
-        "mean_epistemic": 5.923908346936693e-17,
-        "mean_aleatoric": 0.2861451898896019,
-        "mean_total": 0.2861451898896019,
-        "correlation_with_error": 0.677697722605779
+        "mean_epistemic": 5.977679668809778e-17,
+        "mean_aleatoric": 0.28101991546894395,
+        "mean_total": 0.28101991546894395,
+        "correlation_with_error": 0.697462148221271
     },
     "class_distribution": {
         "negative_class": 32840,
