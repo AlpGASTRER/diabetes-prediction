@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.ensemble import RandomForestClassifier
-from imblearn.over_sampling import ADASYN, RandomOverSampler
+from imblearn.over_sampling import SMOTE, ADASYN, RandomOverSampler
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -50,9 +50,10 @@ class PreProcessor:
             n_jobs=-1
         )
         self.adasyn = ADASYN(
-            sampling_strategy=0.75,  # Target 75% of majority class
+            sampling_strategy=0.5,  # Conservative ratio for large dataset
             random_state=42,
-            n_neighbors=5
+            n_neighbors=10,  # More neighbors for better density estimation
+            n_jobs=-1
         )
         
     def fit(self, X, y=None):

@@ -11,10 +11,20 @@ import joblib
 from pathlib import Path
 import json
 
+# Set random seeds for reproducibility
+np.random.seed(42)
+import random
+random.seed(42)
+import torch
+torch.manual_seed(42)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(42)
+
 from preprocessor import PreProcessor
 from ensemble_model import DiabetesEnsemblePredictor
 import visualization as viz
 import matplotlib.pyplot as plt
+from typing import Dict
 
 def load_data(data_path: str) -> pd.DataFrame:
     """Load and validate the dataset."""
@@ -56,86 +66,67 @@ def load_data(data_path: str) -> pd.DataFrame:
     except Exception as e:
         raise RuntimeError(f"Error loading data: {str(e)}")
 
-def evaluate_predictions(y_true, probas, uncertainties, thresholds):
+def evaluate_predictions(y_true: np.ndarray,
+                       probas: np.ndarray,
+                       uncertainties: Dict,
+                       thresholds: Dict[str, float]) -> Dict:
     """Evaluate model performance with comprehensive metrics."""
-    # Convert probabilities to predictions using both thresholds
-    y_pred_screen = (probas >= thresholds['screening']).astype(int)
-    y_pred_confirm = (probas >= thresholds['confirmation']).astype(int)
+    # Get binary predictions using thresholds
+    y_pred_screen = (probas[:, 1] >= thresholds['screening']).astype(int)
+    y_pred_confirm = (probas[:, 1] >= thresholds['confirmation']).astype(int)
     
-    # Basic classification metrics for both stages
+    # Calculate metrics for both stages
     metrics = {
-        'screening': {
-            'accuracy': accuracy_score(y_true, y_pred_screen),
-            'precision': precision_score(y_true, y_pred_screen),
-            'recall': recall_score(y_true, y_pred_screen),
-            'f1': f1_score(y_true, y_pred_screen),
-            'confusion_matrix': confusion_matrix(y_true, y_pred_screen).tolist()
+        'screening_metrics': {
+            'accuracy': float(accuracy_score(y_true, y_pred_screen)),
+            'precision': float(precision_score(y_true, y_pred_screen)),
+            'recall': float(recall_score(y_true, y_pred_screen)),
+            'f1': float(f1_score(y_true, y_pred_screen))
         },
-        'confirmation': {
-            'accuracy': accuracy_score(y_true, y_pred_confirm),
-            'precision': precision_score(y_true, y_pred_confirm),
-            'recall': recall_score(y_true, y_pred_confirm),
-            'f1': f1_score(y_true, y_pred_confirm),
-            'confusion_matrix': confusion_matrix(y_true, y_pred_confirm).tolist()
+        'confirmation_metrics': {
+            'accuracy': float(accuracy_score(y_true, y_pred_confirm)),
+            'precision': float(precision_score(y_true, y_pred_confirm)),
+            'recall': float(recall_score(y_true, y_pred_confirm)),
+            'f1': float(f1_score(y_true, y_pred_confirm))
+        },
+        'probability_metrics': {
+            'roc_auc': float(roc_auc_score(y_true, probas[:, 1])),
+            'average_precision': float(average_precision_score(y_true, probas[:, 1])),
+            'brier_score': float(brier_score_loss(y_true, probas[:, 1]))
         }
     }
     
-    # Probability-based metrics
-    metrics['probability_metrics'] = {
-        'roc_auc': roc_auc_score(y_true, probas),
-        'average_precision': average_precision_score(y_true, probas),
-        'brier_score': brier_score_loss(y_true, probas),
-        'log_loss': log_loss(y_true, probas)
-    }
-    
-    # Uncertainty analysis
+    # Calculate uncertainty metrics
     if isinstance(uncertainties, dict):
-        # New format with detailed uncertainties
         metrics['uncertainty_metrics'] = {
             'mean_epistemic': float(np.mean(uncertainties['epistemic'])),
             'mean_aleatoric': float(np.mean(uncertainties['aleatoric'])),
             'mean_total': float(np.mean(uncertainties['total'])),
             'correlation_with_error': float(np.corrcoef(
                 uncertainties['total'],
-                np.abs(y_true - probas)
-            )[0, 1])
-        }
-    else:
-        # Old format with single uncertainty value
-        metrics['uncertainty_metrics'] = {
-            'mean_uncertainty': float(np.mean(uncertainties)),
-            'correlation_with_error': float(np.corrcoef(
-                uncertainties,
-                np.abs(y_true - probas)
+                np.abs(y_true - probas[:, 1])
             )[0, 1])
         }
     
     return metrics
 
 def train_model(data_path: str, visualize: bool = False, test_mode: bool = False) -> None:
-    """Train the diabetes prediction model.
-    
-    Args:
-        data_path: Path to the dataset
-        visualize: Whether to create visualizations
-        test_mode: If True, runs a quick test with a smaller dataset
-    """
+    """Train the diabetes prediction model."""
     print("Loading data...")
     data = load_data(data_path)
-    
-    # Split features and target
-    X = data.drop('Diabetes_binary', axis=1)
-    y = data['Diabetes_binary']
     
     if test_mode:
         print("\nRunning in test mode with smaller dataset...")
         # Take a smaller stratified sample
         from sklearn.model_selection import StratifiedShuffleSplit
         sss = StratifiedShuffleSplit(n_splits=1, test_size=0.9, random_state=42)
-        for train_idx, _ in sss.split(X, y):
-            X = X.iloc[train_idx]
-            y = y.iloc[train_idx]
-        print(f"Test dataset size: {len(X)}")
+        for train_idx, _ in sss.split(data, data['Diabetes_binary']):
+            data = data.iloc[train_idx]
+        print(f"Test dataset size: {len(data)}")
+    
+    # Split features and target
+    X = data.drop('Diabetes_binary', axis=1)
+    y = data['Diabetes_binary']
     
     # Split into train and test sets
     X_train, X_test, y_train, y_test = train_test_split(
@@ -148,28 +139,26 @@ def train_model(data_path: str, visualize: bool = False, test_mode: bool = False
     print(f"Non-diabetic (0): {sum(y_train == 0)}")
     print(f"Diabetic (1): {sum(y_train == 1)}")
     
-    # Preprocess data
+    # Initialize and fit preprocessor
     print("\nPreprocessing training data...")
     preprocessor = PreProcessor()
-    X_train_proc, y_train_proc = preprocessor.fit_transform(X_train, y_train)
-    
-    if visualize:
-        print("\nGenerating class distribution plot...")
-        viz.plot_class_distribution(y_train, y_train_proc)
+    X_train_proc = preprocessor.fit_transform(X_train)
+    if isinstance(X_train_proc, tuple):
+        X_train_proc = X_train_proc[0]  # Get just the features
     
     # Save preprocessor
     print("\nSaving preprocessor...")
     Path('models').mkdir(exist_ok=True)
     joblib.dump(preprocessor, 'models/preprocessor.joblib')
     
-    # Train model
+    # Initialize and train model
     print("\nTraining ensemble model...")
-    thresholds = {'screening': 0.2, 'confirmation': 0.6}  # Updated thresholds
+    thresholds = {'screening': 0.15, 'confirmation': 0.45}
     model = DiabetesEnsemblePredictor(
         screening_threshold=thresholds['screening'],
         confirmation_threshold=thresholds['confirmation']
     )
-    model.fit(X_train_proc, y_train_proc)
+    model.fit(X_train_proc, y_train)
     
     # Save model
     print("\nSaving model...")
@@ -178,26 +167,28 @@ def train_model(data_path: str, visualize: bool = False, test_mode: bool = False
     # Evaluate on test set
     print("\nEvaluating model...")
     X_test_proc = preprocessor.transform(X_test)
-    probas, uncertainties = model.predict_proba_with_uncertainty(X_test_proc)
+    if isinstance(X_test_proc, tuple):
+        X_test_proc = X_test_proc[0]  # Get just the features
+    probas, uncertainties = model.predict_proba(X_test_proc)
     
     # Calculate and save metrics
     metrics = evaluate_predictions(y_test, probas, uncertainties, thresholds)
     
-    # Print evaluation results
-    print("\nModel Performance:")
-    print("\nScreening Stage Metrics (Threshold: {:.1f})".format(thresholds['screening']))
-    print(f"Accuracy: {metrics['screening']['accuracy']:.3f}")
-    print(f"Precision: {metrics['screening']['precision']:.3f}")
-    print(f"Recall: {metrics['screening']['recall']:.3f}")
-    print(f"F1 Score: {metrics['screening']['f1']:.3f}")
+    # Print key metrics
+    print("\nModel Performance:\n")
+    print("Screening Stage Metrics (Threshold: {:.1f})".format(thresholds['screening']))
+    print(f"Accuracy: {metrics['screening_metrics']['accuracy']:.3f}")
+    print(f"Precision: {metrics['screening_metrics']['precision']:.3f}")
+    print(f"Recall: {metrics['screening_metrics']['recall']:.3f}")
+    print(f"F1 Score: {metrics['screening_metrics']['f1']:.3f}\n")
     
-    print("\nConfirmation Stage Metrics (Threshold: {:.1f})".format(thresholds['confirmation']))
-    print(f"Accuracy: {metrics['confirmation']['accuracy']:.3f}")
-    print(f"Precision: {metrics['confirmation']['precision']:.3f}")
-    print(f"Recall: {metrics['confirmation']['recall']:.3f}")
-    print(f"F1 Score: {metrics['confirmation']['f1']:.3f}")
+    print("Confirmation Stage Metrics (Threshold: {:.1f})".format(thresholds['confirmation']))
+    print(f"Accuracy: {metrics['confirmation_metrics']['accuracy']:.3f}")
+    print(f"Precision: {metrics['confirmation_metrics']['precision']:.3f}")
+    print(f"Recall: {metrics['confirmation_metrics']['recall']:.3f}")
+    print(f"F1 Score: {metrics['confirmation_metrics']['f1']:.3f}\n")
     
-    print("\nProbability Metrics:")
+    print("Probability Metrics:")
     print(f"ROC AUC: {metrics['probability_metrics']['roc_auc']:.3f}")
     print(f"Average Precision: {metrics['probability_metrics']['average_precision']:.3f}")
     print(f"Brier Score: {metrics['probability_metrics']['brier_score']:.3f}")
@@ -260,7 +251,7 @@ def predict(data_path: str) -> None:
     X_proc = preprocessor.transform(data)
     
     # Make predictions
-    probas, uncertainties = model.predict_proba_with_uncertainty(X_proc)
+    probas, uncertainties = model.predict_proba(X_proc)
     
     # Calculate confidence scores
     def calculate_confidence(proba, uncertainty):
@@ -271,17 +262,17 @@ def predict(data_path: str) -> None:
         # Combine with uncertainty (weighted average)
         return 0.7 * (1 - uncertainty) + 0.3 * normalized_distance
 
-    confidences = np.array([calculate_confidence(p, u) for p, u in zip(probas, uncertainties['total'])])
+    confidences = np.array([calculate_confidence(p, u) for p, u in zip(probas[:, 1], uncertainties['total'])])
     
     # Create results DataFrame
     results = pd.DataFrame({
-        'Probability': probas,
+        'Probability': probas[:, 1],
         'Total_Uncertainty': uncertainties['total'],
         'Epistemic_Uncertainty': uncertainties['epistemic'],
         'Aleatoric_Uncertainty': uncertainties['aleatoric'],
         'Screening_Confidence': uncertainties['screening_confidence'],
         'Confirmation_Confidence': uncertainties['confirmation_confidence'],
-        'Prediction': (probas >= 0.6).astype(int),
+        'Prediction': (probas[:, 1] >= 0.6).astype(int),
         'Confidence': confidences,
         'Risk_Level': pd.cut(confidences, 
             bins=[0, 0.3, 0.6, 0.8, 1.0],
@@ -294,7 +285,7 @@ def predict(data_path: str) -> None:
     
     # Create visualization
     viz.create_interactive_dashboard(
-        probas, uncertainties['total'], None,
+        probas[:, 1], uncertainties['total'], None,
         {'screening': 0.2, 'confirmation': 0.6}  # Updated thresholds
     )
 
