@@ -2,6 +2,158 @@
 
 A robust machine learning pipeline for diabetes prediction with uncertainty estimation, using a two-stage ensemble approach and advanced preprocessing techniques. The model is trained on the [Diabetes Health Indicators Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset) from the BRFSS 2015 survey.
 
+## Features
+
+- **Accurate Diabetes Risk Prediction**: Uses an ensemble model combining multiple machine learning algorithms
+- **Confidence Levels**: Provides prediction confidence percentages
+- **Detailed Risk Assessment**: Multiple stages of risk evaluation
+- **Health Warnings**: Personalized health alerts based on input factors
+- **Risk Factor Analysis**: Shows the importance of each health indicator
+- **Uncertainty Estimation**: Includes model and data uncertainty metrics
+
+## How to Use
+
+### Setup and Installation
+
+1. Create and activate conda environment:
+```bash
+conda create -n diabetes_pred python=3.11
+conda activate diabetes_pred
+```
+
+2. Clone the repository:
+```bash
+git clone https://github.com/yourusername/diabetes-prediction.git
+cd diabetes-prediction
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Start the API server:
+```bash
+uvicorn src.api.app:app --reload
+```
+
+The API will be available at:
+- Main API: `http://localhost:8000`
+- **Interactive Documentation**: `http://localhost:8000/docs` (Swagger UI)
+- Alternative Documentation: `http://localhost:8000/redoc` (ReDoc UI)
+
+### Interactive API Documentation
+
+The easiest way to explore and test the API is through the Swagger UI at `http://localhost:8000/docs`, where you can:
+- View detailed API specifications
+- Try out all endpoints with an interactive interface
+- See request/response examples
+- Test different parameter combinations
+- View detailed validation rules and constraints
+
+### API Endpoints
+
+#### 1. Health Prediction Endpoint
+- **URL**: `/predict`
+- **Method**: POST
+- **Description**: Predicts diabetes risk based on health indicators
+
+Example request:
+```json
+{
+    "BMI": 27.5,
+    "Age": 7,
+    "HighBP": 1,
+    "HighChol": 1,
+    "CholCheck": 1,
+    "Smoker": 0,
+    "Stroke": 0,
+    "HeartDiseaseorAttack": 0,
+    "PhysActivity": 1,
+    "Fruits": 1,
+    "Veggies": 1,
+    "HvyAlcoholConsump": 0,
+    "AnyHealthcare": 1,
+    "NoDocbcCost": 0,
+    "GenHlth": 2,
+    "MentHlth": 0,
+    "PhysHlth": 0,
+    "DiffWalk": 0,
+    "Sex": 1,
+    "Education": 6,
+    "Income": 7
+}
+```
+
+Example response:
+```json
+{
+    "has_diabetes": false,
+    "confidence_percentage": 92.5,
+    "screening_stage": {
+        "probability": 0.15,
+        "risk_assessment": "LOW RISK - Continue maintaining healthy lifestyle"
+    },
+    "confirmation_stage": {
+        "probability": 0.08,
+        "risk_assessment": "MINIMAL RISK - Good health indicators"
+    },
+    "risk_level": "LOW",
+    "uncertainties": {
+        "epistemic": 0.02,
+        "aleatoric": 0.03,
+        "total": 0.05
+    },
+    "warnings": [
+        "Your BMI (27.5) indicates overweight. Consider consulting a healthcare provider.",
+        "High blood pressure detected. Regular monitoring recommended."
+    ],
+    "feature_importances": {
+        "BMI": {
+            "importance": 0.25,
+            "description": "Higher BMI increases diabetes risk. Consider weight management."
+        }
+        // ... other features
+    }
+}
+```
+
+#### 2. Model Information Endpoint
+- **URL**: `/model-info`
+- **Method**: GET
+- **Description**: Returns information about the model and required features
+
+#### 3. Health Check Endpoint
+- **URL**: `/health`
+- **Method**: GET
+- **Description**: Checks if the API is running and model is loaded
+
+### Input Parameters Guide
+
+All health indicators should be provided as shown in the example above. Here's what each parameter means:
+
+- **BMI**: Body Mass Index (10.0-100.0)
+- **Age**: Age category (1-13, where 1: 18-24, 13: 80+ years)
+- **HighBP**: High Blood Pressure (0: No, 1: Yes)
+- **HighChol**: High Cholesterol (0: No, 1: Yes)
+- **CholCheck**: Cholesterol Check in 5 years (0: No, 1: Yes)
+- **Smoker**: Have you smoked 100 cigarettes in your life (0: No, 1: Yes)
+- **Stroke**: Ever had a stroke (0: No, 1: Yes)
+- **HeartDiseaseorAttack**: Coronary heart disease or heart attack (0: No, 1: Yes)
+- **PhysActivity**: Physical activity in past 30 days (0: No, 1: Yes)
+- **Fruits**: Consume fruit 1+ times per day (0: No, 1: Yes)
+- **Veggies**: Consume vegetables 1+ times per day (0: No, 1: Yes)
+- **HvyAlcoholConsump**: Heavy alcohol consumption (0: No, 1: Yes)
+- **AnyHealthcare**: Any healthcare coverage (0: No, 1: Yes)
+- **NoDocbcCost**: Was there a time in the past 12 months when you needed to see a doctor but could not because of cost? (0: No, 1: Yes)
+- **GenHlth**: General Health (1-5, 1: Excellent, 5: Poor)
+- **MentHlth**: Days of poor mental health (0-30)
+- **PhysHlth**: Days of poor physical health (0-30)
+- **DiffWalk**: Do you have serious difficulty walking or climbing stairs? (0: No, 1: Yes)
+- **Sex**: Gender (0: Female, 1: Male)
+- **Education**: Education level (1-6, 1: Never attended school, 6: College graduate)
+- **Income**: Income level (1-8, 1: Less than $10,000, 8: $75,000 or more)
+
 ## Dataset
 
 The dataset contains health indicators that may be used to predict diabetes, collected from the Behavioral Risk Factor Surveillance System (BRFSS) 2015 health survey. It includes:
@@ -145,73 +297,6 @@ To maintain reproducibility:
 2. Use the same Python environment and package versions
 3. Process the data in the same order
 4. Run on the same hardware architecture when possible
-
-## Installation
-
-1. Create and activate conda environment:
-```bash
-conda create -n diabetes_pred python=3.11
-conda activate diabetes_pred
-```
-
-2. Clone the repository:
-```bash
-git clone https://github.com/yourusername/diabetes-prediction.git
-cd diabetes-prediction
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Download the dataset:
-- Visit [Kaggle Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset)
-- Download `diabetes_binary_health_indicators_BRFSS2015.csv`
-- Place it directly in the project root directory (not in a subdirectory)
-
-## Usage
-
-Make sure to activate the conda environment before running any commands:
-```bash
-conda activate diabetes_pred
-```
-
-### Training
-```bash
-python src/main.py --mode train
-```
-
-### Prediction
-```bash
-python src/main.py --mode predict
-```
-
-### Testing
-
-The project includes two types of tests:
-
-#### Quick Integration Test
-Run a quick smoke test to verify the basic functionality:
-```bash
-python src/main.py --mode test
-```
-
-Or using the full conda path:
-```bash
-C:\Users\ahmed\.conda\envs\diabetes_pred\python.exe src/main.py --mode test
-```
-
-This will:
-- Train the model on a small subset (10%) of the dataset
-- Test prediction functionality
-- Provide immediate pass/fail feedback
-
-#### Development Tests
-Run the full test suite for thorough testing during development:
-```bash
-pytest tests/test_pipeline.py -v
-```
 
 ## Project Structure
 ```
