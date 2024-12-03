@@ -1,6 +1,24 @@
 import requests
 import json
 
+def print_section(title, content, indent=0):
+    """Helper function to print sections with proper formatting"""
+    indent_str = " " * indent
+    print(f"\n{indent_str}{'-' * 20} {title} {'-' * 20}")
+    if isinstance(content, dict):
+        for key, value in content.items():
+            if isinstance(value, dict):
+                print(f"{indent_str}{key}:")
+                for subkey, subvalue in value.items():
+                    print(f"{indent_str}  {subkey}: {subvalue}")
+            else:
+                print(f"{indent_str}{key}: {value}")
+    elif isinstance(content, list):
+        for item in content:
+            print(f"{indent_str}• {item}")
+    else:
+        print(f"{indent_str}{content}")
+
 def test_health():
     try:
         response = requests.get("http://localhost:8000/health")
@@ -21,16 +39,16 @@ def test_prediction():
         "Smoker": 0,
         "Stroke": 0,
         "HeartDiseaseorAttack": 0,
-        "PhysActivity": 1,
-        "Fruits": 1,
-        "Veggies": 1,
+        "PhysActivity": 0,  # Added to trigger lifestyle warning
+        "Fruits": 0,        # Added to trigger dietary warning
+        "Veggies": 0,
         "HvyAlcoholConsump": 0,
         "AnyHealthcare": 1,
         "NoDocbcCost": 0,
         "GenHlth": 3,
-        "MentHlth": 0,
+        "MentHlth": 15,    # Added to trigger mental health warning
         "PhysHlth": 0,
-        "DiffWalk": 0,
+        "DiffWalk": 1,     # Added to trigger mobility warning
         "Education": 6,
         "Income": 3
     }
@@ -46,28 +64,44 @@ def test_prediction():
         
         if response.status_code == 200:
             result = response.json()
-            print("\nPrediction Results:")
-            print(json.dumps({
-                "Diabetes Status": "Positive" if result["has_diabetes"] else "Negative",
+            
+            # Print main prediction
+            print_section("DIABETES PREDICTION", {
+                "Status": "Positive" if result["has_diabetes"] else "Negative",
                 "Confidence": f"{result['confidence_percentage']}%",
-                "Risk Level": result["risk_level"],
-                "Warnings": result["warnings"] if result.get("warnings") else "None",
-                "Uncertainties": {
-                    "Total": f"{result['uncertainties']['total'] * 100:.1f}%",
-                    "Epistemic": f"{result['uncertainties']['epistemic'] * 100:.1f}%",
-                    "Aleatoric": f"{result['uncertainties']['aleatoric'] * 100:.1f}%"
-                },
-                "Top Risk Factors": dict(sorted(
-                    result["feature_importances"].items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )[:3])
-            }, indent=2))
+                "Risk Level": result["risk_level"]
+            })
+            
+            # Print health warnings
+            print_section("HEALTH WARNINGS", result.get("warnings", ["No warnings"]))
+            
+            # Print uncertainties
+            print_section("PREDICTION UNCERTAINTY", {
+                "Total Uncertainty": f"{result['uncertainties']['total'] * 100:.1f}%",
+                "Model Uncertainty": f"{result['uncertainties']['epistemic'] * 100:.1f}%",
+                "Data Uncertainty": f"{result['uncertainties']['aleatoric'] * 100:.1f}%"
+            })
+            
+            # Print risk factors
+            print_section("RISK FACTORS (Ordered by Impact)")
+            sorted_factors = sorted(
+                result["feature_importances"].items(),
+                key=lambda x: x[1]['importance'],
+                reverse=True
+            )
+            for factor, info in sorted_factors:
+                print(f"\n• {factor}:")
+                print(f"  Impact: {info['importance'] * 100:.1f}%")
+                print(f"  Description: {info['description']}")
+            
         else:
             print("Error Response:")
             print(response.text)
     except Exception as e:
         print(f"Error in prediction: {str(e)}")
+        if 'response' in locals() and response.status_code == 200:
+            print("\nRaw response for debugging:")
+            print(json.dumps(response.json(), indent=2))
 
 if __name__ == "__main__":
     test_health()

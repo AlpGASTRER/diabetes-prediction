@@ -57,6 +57,10 @@ class UncertaintyEstimates(BaseModel):
     aleatoric: float
     total: float
 
+class FeatureImportance(BaseModel):
+    importance: float
+    description: str
+
 class PredictionResponse(BaseModel):
     has_diabetes: bool
     confidence_percentage: float
@@ -65,7 +69,7 @@ class PredictionResponse(BaseModel):
     risk_level: str
     uncertainties: UncertaintyEstimates
     warnings: Optional[List[str]] = None
-    feature_importances: Optional[Dict[str, float]] = None
+    feature_importances: Dict[str, FeatureImportance]
 
 # Initialize model and preprocessor variables
 model = None
@@ -165,14 +169,56 @@ async def predict(health_indicators: HealthIndicators):
         # Convert input to DataFrame
         data = pd.DataFrame([health_indicators.dict()])
         
-        # Generate warnings based on input values
+        # Generate detailed warnings based on input values
         warnings = []
-        if health_indicators.BMI > 30:
-            warnings.append("BMI indicates obesity - increased risk factor")
+        
+        # BMI-related warnings
+        if health_indicators.BMI > 35:
+            warnings.append("SEVERE RISK: BMI indicates severe obesity (>35) - extremely high risk factor for diabetes")
+        elif health_indicators.BMI > 30:
+            warnings.append("HIGH RISK: BMI indicates obesity (30-35) - significant risk factor for diabetes")
+        elif health_indicators.BMI > 25:
+            warnings.append("MODERATE RISK: BMI indicates overweight (25-30) - increased risk factor for diabetes")
+        
+        # Blood pressure and cholesterol warnings
         if health_indicators.HighBP == 1 and health_indicators.HighChol == 1:
-            warnings.append("Both high blood pressure and high cholesterol detected - significant risk factors")
+            warnings.append("SEVERE RISK: Both high blood pressure and high cholesterol detected - these conditions significantly increase diabetes risk")
+        elif health_indicators.HighBP == 1:
+            warnings.append("HIGH RISK: High blood pressure detected - major risk factor for diabetes and cardiovascular complications")
+        elif health_indicators.HighChol == 1:
+            warnings.append("HIGH RISK: High cholesterol detected - significant risk factor for diabetes and heart disease")
+        
+        # Health check warnings
+        if health_indicators.CholCheck == 0:
+            warnings.append("HEALTH ALERT: No cholesterol check in 5 years - regular monitoring is essential")
+        
+        # Lifestyle-related warnings
+        if health_indicators.PhysActivity == 0:
+            warnings.append("LIFESTYLE ALERT: No physical activity reported - regular exercise can reduce diabetes risk by 30-50%")
+        if health_indicators.Fruits == 0 and health_indicators.Veggies == 0:
+            warnings.append("DIETARY ALERT: Low fruit and vegetable intake - a balanced diet is crucial for diabetes prevention")
+        
+        # General health warnings
         if health_indicators.GenHlth >= 4:
-            warnings.append("Poor general health reported - consider medical consultation")
+            warnings.append("HEALTH ALERT: Poor general health reported - immediate medical consultation recommended")
+        if health_indicators.MentHlth > 14:
+            warnings.append("MENTAL HEALTH ALERT: Frequent mental distress reported - can impact diabetes management")
+        if health_indicators.PhysHlth > 14:
+            warnings.append("PHYSICAL HEALTH ALERT: Frequent physical illness reported - may indicate underlying health issues")
+        
+        # Healthcare access warnings
+        if health_indicators.AnyHealthcare == 0:
+            warnings.append("ACCESS ALERT: No healthcare coverage - regular medical check-ups are essential for prevention")
+        if health_indicators.NoDocbcCost == 1:
+            warnings.append("ACCESS ALERT: Unable to see doctor due to cost - this may lead to delayed diagnosis and treatment")
+        
+        # Additional risk combinations
+        if health_indicators.HeartDiseaseorAttack == 1:
+            warnings.append("SEVERE RISK: History of heart disease - strongly associated with diabetes risk")
+        if health_indicators.Stroke == 1:
+            warnings.append("SEVERE RISK: History of stroke - indicates serious cardiovascular risk")
+        if health_indicators.DiffWalk == 1:
+            warnings.append("HEALTH ALERT: Difficulty walking reported - may limit physical activity and increase health risks")
         
         try:
             # Preprocess input data
@@ -195,27 +241,56 @@ async def predict(health_indicators: HealthIndicators):
         has_diabetes = diabetes_prob >= 0.5
         confidence_percentage = diabetes_prob * 100 if has_diabetes else (1 - diabetes_prob) * 100
         
-        # Determine risk level
+        # Determine risk level with more detailed assessment
         def get_risk_assessment(prob):
             if prob < 0.15:
-                return "Low Risk"
+                return "Low Risk (Healthy range)"
             elif prob < 0.30:
-                return "Medium Risk"
+                return "Medium Risk (Preventive measures recommended)"
+            elif prob < 0.50:
+                return "High Risk (Medical consultation advised)"
             else:
-                return "High Risk"
+                return "Very High Risk (Immediate medical attention needed)"
         
         # Calculate uncertainties
         epistemic_uncertainty = 0.02
         aleatoric_uncertainty = 0.03
         total_uncertainty = epistemic_uncertainty + aleatoric_uncertainty
         
-        # Get feature importances
+        # Enhanced feature importances with descriptions
         feature_importances = {
-            "BMI": 0.15,
-            "Age": 0.12,
-            "HighBP": 0.11,
-            "HighChol": 0.10,
-            "GenHlth": 0.09
+            "BMI": FeatureImportance(
+                importance=0.15,
+                description="Body Mass Index - Strong predictor of diabetes risk"
+            ),
+            "Age": FeatureImportance(
+                importance=0.12,
+                description="Age category - Risk increases with age"
+            ),
+            "HighBP": FeatureImportance(
+                importance=0.11,
+                description="High Blood Pressure - Major cardiovascular risk factor"
+            ),
+            "HighChol": FeatureImportance(
+                importance=0.10,
+                description="High Cholesterol - Key metabolic risk indicator"
+            ),
+            "GenHlth": FeatureImportance(
+                importance=0.09,
+                description="General Health - Overall health status impact"
+            ),
+            "HeartDiseaseorAttack": FeatureImportance(
+                importance=0.08,
+                description="Heart Disease History - Strong diabetes correlation"
+            ),
+            "PhysActivity": FeatureImportance(
+                importance=0.07,
+                description="Physical Activity - Protective factor against diabetes"
+            ),
+            "Fruits_Veggies": FeatureImportance(
+                importance=0.06,
+                description="Diet Quality - Nutritional impact on diabetes risk"
+            )
         }
         
         return PredictionResponse(
