@@ -10,29 +10,36 @@
         "weighted_f1": 0.748138591375931
     },
     "confirmation_metrics": {
-        "accuracy": 0.7344160622306317,
-        "balanced_accuracy": 0.7566285593164094,
-        "precision": 0.313206106870229,
-        "recall": 0.7872217958557176,
-        "f1": 0.4481214504150284,
-        "weighted_precision": 0.8675718865285981,
-        "weighted_recall": 0.7344160622306317,
-        "weighted_f1": 0.7734922647846441
+        "accuracy": 0.6734731420161884,
+        "balanced_accuracy": 0.7538459803713533,
+        "precision": 0.2777195685670262,
+        "recall": 0.8645433614735226,
+        "f1": 0.42039464477305594,
+        "weighted_precision": 0.8731540007872346,
+        "weighted_recall": 0.6734731420161884,
+        "weighted_f1": 0.7244573462004059
     },
     "probability_metrics": {
-        "roc_auc": 0.8341222308118714,
-        "average_precision": 0.4299628427207442,
-        "brier_score": 0.09528633026541097
+        "roc_auc": 0.83412195621834,
+        "average_precision": 0.42996184810284666,
+        "brier_score": 0.09528634319061961
     },
     "uncertainty_metrics": {
-        "mean_epistemic": 5.977679668809778e-17,
-        "mean_aleatoric": 0.28101991546894395,
-        "mean_total": 0.28101991546894395,
-        "correlation_with_error": 0.697462148221271
+        "total": 0.009249874811561079,
+        "epistemic": 0.009249874811561079,
+        "aleatoric": 3.8472731167859643e-17,
+        "screening": {
+            "epistemic": 0.009249874811561079,
+            "aleatoric": 3.8472731167859643e-17
+        },
+        "confirmation": {
+            "epistemic": 0.009249874811561079,
+            "aleatoric": 3.8472731167859643e-17
+        }
     },
     "class_distribution": {
         "negative_class": 32840,
         "positive_class": 5212,
-        "class_ratio": 0.13697046147377273
+        "positive_class_ratio": 0.13697046147377273
     }
 }

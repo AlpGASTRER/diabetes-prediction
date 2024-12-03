@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from typing import Tuple, Dict, Union, Optional
+from typing import Tuple, Dict, Union, Optional, List
 import xgboost as xgb
 import lightgbm as lgb
 from catboost import CatBoostClassifier
@@ -17,10 +17,10 @@ class DiabetesEnsemblePredictor:
     """Two-stage ensemble model for diabetes prediction with uncertainty estimation"""
     
     def __init__(self, 
-                 screening_threshold: float = 0.12,  # Adjusted for better balance
-                 confirmation_threshold: float = 0.15,  # Adjusted for better balance
-                 n_calibration_models: int = 25,  # Increased for better calibration
-                 mc_iterations: int = 35,
+                 screening_threshold: float = 0.12,  
+                 confirmation_threshold: float = 0.10,  
+                 n_calibration_models: int = 35,  
+                 mc_iterations: int = 50,  
                  threshold: float = 0.5):
         """Initialize the ensemble predictor."""
         self.screening_threshold = screening_threshold
@@ -84,15 +84,15 @@ class DiabetesEnsemblePredictor:
         if stage == 'screening':
             models = {
                 'lgb': lgb.LGBMClassifier(
-                    n_estimators=500,  # Increased for better convergence
-                    learning_rate=0.03,  # Reduced for better generalization
-                    num_leaves=63,  # Reduced to prevent overfitting
-                    max_depth=8,  # Adjusted for balance
+                    n_estimators=500,  
+                    learning_rate=0.03,  
+                    num_leaves=63,  
+                    max_depth=8,  
                     min_child_samples=20,
                     min_split_gain=1e-5,
                     subsample=0.85,
                     feature_fraction=0.85,
-                    scale_pos_weight=6,  # Adjusted for better balance
+                    scale_pos_weight=6,  
                     force_row_wise=True,
                     random_state=42,
                     boosting_type='gbdt',
@@ -131,15 +131,15 @@ class DiabetesEnsemblePredictor:
         else:  # Confirmation stage
             models = {
                 'lgb': lgb.LGBMClassifier(
-                    n_estimators=500,  # Increased for better convergence
-                    learning_rate=0.03,  # Reduced for better generalization
-                    num_leaves=63,  # Reduced to prevent overfitting
-                    max_depth=8,  # Adjusted for balance
+                    n_estimators=500,  
+                    learning_rate=0.03,  
+                    num_leaves=63,  
+                    max_depth=8,  
                     min_child_samples=20,
                     min_split_gain=1e-5,
                     subsample=0.85,
                     feature_fraction=0.85,
-                    scale_pos_weight=6,  # Adjusted for better balance
+                    scale_pos_weight=6,  
                     force_row_wise=True,
                     random_state=42,
                     boosting_type='gbdt',
@@ -366,8 +366,51 @@ class DiabetesEnsemblePredictor:
         
         return weighted_preds
     
+    def _get_risk_level(self, X: np.ndarray, feature_names: List[str]) -> np.ndarray:
+        """Calculate risk levels based on BRFSS criteria"""
+        try:
+            risk_levels = np.ones(len(X))  # Default moderate risk
+            
+            # Get feature indices safely
+            feature_indices = {}
+            key_features = ['Age', 'BMI', 'HighBP', 'HighChol', 'Smoker']
+            for feature in key_features:
+                try:
+                    feature_indices[feature] = feature_names.index(feature)
+                except ValueError:
+                    print(f"Warning: Feature {feature} not found in feature names")
+                    return risk_levels
+            
+            # High risk criteria
+            high_risk = np.zeros(len(X), dtype=bool)
+            if all(f in feature_indices for f in ['Age', 'BMI', 'HighBP']):
+                high_risk = (
+                    (X[:, feature_indices['Age']] >= 8) &  # Age 55+
+                    (X[:, feature_indices['BMI']] >= 30) &  # Obese
+                    (X[:, feature_indices['HighBP']] == 1)  # High BP
+                )
+            
+            # Very high risk criteria
+            very_high_risk = np.zeros(len(X), dtype=bool)
+            if all(f in feature_indices for f in ['HighBP', 'HighChol']):
+                very_high_risk = (
+                    high_risk & 
+                    (X[:, feature_indices['HighBP']] == 1) &
+                    (X[:, feature_indices['HighChol']] == 1)
+                )
+            
+            # Assign risk levels (1: Low, 2: Moderate, 3: High, 4: Very High)
+            risk_levels[high_risk] = 3
+            risk_levels[very_high_risk] = 4
+            
+            return risk_levels
+            
+        except Exception as e:
+            print(f"Warning: Error in risk level calculation: {str(e)}")
+            return np.ones(len(X))  # Return moderate risk as default
+
     def predict_proba(self, X: Union[np.ndarray, pd.DataFrame]) -> Tuple[np.ndarray, Dict]:
-        """Make predictions with uncertainty estimates."""
+        """Enhanced prediction with risk stratification and uncertainty estimation"""
         if not self.is_fitted:
             raise ValueError("Model must be fitted before making predictions")
         
@@ -383,7 +426,14 @@ class DiabetesEnsemblePredictor:
             if screen_probs.ndim != 2 or screen_probs.shape[1] != 2:
                 raise ValueError(f"Invalid screening probabilities shape: {screen_probs.shape}")
             
-            screen_mask = screen_probs[:, 1] >= self.screening_threshold
+            # Calculate uncertainties
+            uncertainties = self._calculate_uncertainties(X)
+            
+            # Get adaptive threshold
+            current_threshold = self._adaptive_threshold(screen_probs, uncertainties)
+            
+            # Apply screening
+            screen_mask = screen_probs[:, 1] >= current_threshold
             
             # Initialize confirmation probabilities with screening probabilities
             confirm_probs = np.copy(screen_probs)
@@ -398,64 +448,220 @@ class DiabetesEnsemblePredictor:
                     
                 confirm_probs[screen_mask] = conf_preds
             
-            # Combine predictions based on screening results
-            final_probs = np.where(screen_mask[:, np.newaxis], confirm_probs, screen_probs)
+            # Calculate risk levels if feature names are available
+            risk_levels = None
+            if hasattr(self, 'feature_names_'):
+                risk_levels = self._get_risk_level(X, self.feature_names_)
             
-            # Validate final probabilities
-            if np.any(np.isnan(final_probs)):
-                print("Warning: NaN values found in probabilities, replacing with 0.5")
-                final_probs = np.nan_to_num(final_probs, nan=0.5)
+            # Adjust probabilities based on risk level
+            if risk_levels is not None:
+                # Increase probabilities for high risk cases
+                high_risk_mask = risk_levels >= 3
+                if np.any(high_risk_mask):
+                    confirm_probs[high_risk_mask, 1] = np.minimum(
+                        confirm_probs[high_risk_mask, 1] * 1.2,
+                        1.0
+                    )
+                    confirm_probs[high_risk_mask, 0] = 1 - confirm_probs[high_risk_mask, 1]
             
-            if not np.allclose(final_probs.sum(axis=1), 1.0, rtol=1e-5):
-                print("Warning: Probabilities don't sum to 1, normalizing")
-                final_probs = final_probs / final_probs.sum(axis=1, keepdims=True)
-            
-            # Calculate uncertainties
-            epistemic, aleatoric, total = self._calculate_uncertainties(X)
-            
-            uncertainties = {
-                'epistemic': epistemic,
-                'aleatoric': aleatoric,
-                'total': total,
-                'screening_confidence': 1 - 2 * np.abs(screen_probs[:, 1] - 0.5),
-                'confirmation_confidence': 1 - 2 * np.abs(confirm_probs[:, 1] - 0.5)
+            return confirm_probs, {
+                'uncertainties': uncertainties,
+                'risk_levels': risk_levels if risk_levels is not None else np.ones(len(X)),
+                'screening_probs': screen_probs,
+                'confirmation_probs': confirm_probs
             }
             
-            return final_probs, uncertainties
-            
         except Exception as e:
-            print(f"\nError in predict_proba: {str(e)}")
-            print(f"Input shape: {X.shape}")
+            print(f"Error in prediction: {str(e)}")
             if 'screen_probs' in locals():
                 print(f"Screening probabilities shape: {screen_probs.shape}")
             if 'conf_preds' in locals():
                 print(f"Confirmation probabilities shape: {conf_preds.shape}")
             raise
-    
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predict class labels for samples in X."""
+
+    def _calculate_uncertainties(self, X: np.ndarray) -> Dict[str, np.ndarray]:
+        """Enhanced uncertainty calculation with BRFSS-specific considerations"""
         try:
-            # Get probabilities and handle potential errors
+            # Calculate predictions from all models in both stages
+            screen_preds = np.array([
+                [model.predict_proba(X)[:, 1] for model in self.calibrated_models['screening'][name]]
+                for name in ['lgb', 'xgb', 'cat']
+            ])  # Shape: (n_model_types, n_calibrated_models, n_samples)
+            
+            confirm_preds = np.array([
+                [model.predict_proba(X)[:, 1] for model in self.calibrated_models['confirmation'][name]]
+                for name in ['lgb', 'xgb', 'cat']
+            ])
+            
+            # Calculate epistemic uncertainty (model disagreement)
+            epistemic_screen = np.std(np.mean(screen_preds, axis=1), axis=0)
+            epistemic_confirm = np.std(np.mean(confirm_preds, axis=1), axis=0)
+            epistemic = np.maximum(epistemic_screen, epistemic_confirm)
+            
+            # Calculate aleatoric uncertainty (data uncertainty)
+            aleatoric_screen = np.mean(np.std(screen_preds, axis=1), axis=0)
+            aleatoric_confirm = np.mean(np.std(confirm_preds, axis=1), axis=0)
+            aleatoric = np.maximum(aleatoric_screen, aleatoric_confirm)
+            
+            # Calculate total uncertainty
+            total = np.sqrt(epistemic**2 + aleatoric**2)
+            
+            return {
+                'epistemic': epistemic,
+                'aleatoric': aleatoric,
+                'total': total,
+                'screening': {
+                    'epistemic': epistemic_screen,
+                    'aleatoric': aleatoric_screen
+                },
+                'confirmation': {
+                    'epistemic': epistemic_confirm,
+                    'aleatoric': aleatoric_confirm
+                }
+            }
+            
+        except Exception as e:
+            print(f"Warning: Error in uncertainty calculation: {str(e)}")
+            # Return default uncertainties
+            n_samples = len(X)
+            return {
+                'epistemic': np.ones(n_samples) * 0.1,
+                'aleatoric': np.ones(n_samples) * 0.1,
+                'total': np.ones(n_samples) * 0.15,
+                'screening': {
+                    'epistemic': np.ones(n_samples) * 0.1,
+                    'aleatoric': np.ones(n_samples) * 0.1
+                },
+                'confirmation': {
+                    'epistemic': np.ones(n_samples) * 0.1,
+                    'aleatoric': np.ones(n_samples) * 0.1
+                }
+            }
+
+    def _adaptive_threshold(self, probas: np.ndarray, uncertainties: Dict[str, np.ndarray], risk_levels: Optional[np.ndarray] = None) -> float:
+        """Dynamic threshold based on prediction uncertainty and risk levels"""
+        try:
+            # Get base threshold
+            base_threshold = self.screening_threshold
+            
+            # Calculate uncertainty adjustment
+            total_uncertainty = uncertainties['total']
+            mean_uncertainty = np.mean(total_uncertainty)
+            
+            # Base uncertainty adjustment
+            if mean_uncertainty > 0.2:  # High uncertainty
+                uncertainty_factor = 1.2  # More conservative
+            elif mean_uncertainty < 0.1:  # Low uncertainty
+                uncertainty_factor = 0.9  # More lenient
+            else:
+                # Linear interpolation for medium uncertainty
+                uncertainty_factor = 1 + (mean_uncertainty - 0.1) * 2
+            
+            # Risk level adjustment if available
+            risk_factor = 1.0
+            if risk_levels is not None:
+                # Higher risk levels should have lower thresholds
+                risk_weights = {
+                    1: 1.1,    # Low risk: slightly higher threshold
+                    2: 1.0,    # Moderate risk: baseline
+                    3: 0.9,    # High risk: lower threshold
+                    4: 0.8     # Very high risk: much lower threshold
+                }
+                
+                # Calculate weighted average risk factor
+                unique_risks, risk_counts = np.unique(risk_levels, return_counts=True)
+                total_samples = len(risk_levels)
+                risk_factor = sum(
+                    risk_weights.get(risk, 1.0) * count / total_samples
+                    for risk, count in zip(unique_risks, risk_counts)
+                )
+            
+            # Combine adjustments
+            final_threshold = base_threshold * uncertainty_factor * risk_factor
+            
+            # Ensure threshold stays within reasonable bounds
+            return np.clip(final_threshold, 0.05, 0.25)
+                
+        except Exception as e:
+            print(f"Warning: Error in adaptive threshold calculation: {str(e)}")
+            return self.screening_threshold  # Return base threshold if calculation fails
+
+    def predict(self, X: np.ndarray, return_proba: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        """Make predictions with the ensemble model"""
+        try:
+            # Get probabilities and uncertainties
             probas, uncertainties = self.predict_proba(X)
             
-            # Get predictions using confirmation threshold for better precision
-            predictions = (probas[:, 1] >= self.confirmation_threshold).astype(int)
+            # Calculate risk levels
+            risk_levels = self._calculate_risk_levels(X)
             
-            # Add warning for highly uncertain predictions
-            high_uncertainty_mask = uncertainties['total'] > 0.2
-            if np.any(high_uncertainty_mask):
-                n_uncertain = np.sum(high_uncertainty_mask)
-                print(f"\nWarning: {n_uncertain} predictions have high uncertainty (>0.2)")
-                print("Consider these predictions with caution.")
+            # Get adaptive threshold
+            threshold = self._adaptive_threshold(probas, uncertainties, risk_levels)
             
+            # Make predictions
+            predictions = (probas[:, 1] > threshold).astype(int)
+            
+            if return_proba:
+                return predictions, probas
             return predictions
             
         except Exception as e:
-            print(f"Error during prediction: {str(e)}")
-            print(f"Input shape: {X.shape if hasattr(X, 'shape') else 'unknown'}")
-            # Return safe default predictions
-            return np.zeros(len(X) if hasattr(X, '__len__') else 1, dtype=int)
-    
+            print(f"Error in prediction: {str(e)}")
+            if return_proba:
+                return np.zeros(len(X)), np.zeros(len(X))
+            return np.zeros(len(X))
+            
+    def _calculate_risk_levels(self, X: np.ndarray) -> np.ndarray:
+        """Calculate risk levels based on feature values"""
+        try:
+            risk_levels = np.ones(len(X))  # Default: moderate risk
+            
+            # Get feature indices (adjust these based on your actual feature order)
+            age_idx = self.feature_names.index('age') if 'age' in self.feature_names else None
+            bmi_idx = self.feature_names.index('bmi') if 'bmi' in self.feature_names else None
+            bp_idx = self.feature_names.index('blood_pressure') if 'blood_pressure' in self.feature_names else None
+            
+            for i in range(len(X)):
+                risk_score = 0
+                
+                # Age risk (0-2 points)
+                if age_idx is not None:
+                    age = X[i, age_idx]
+                    if age >= 65:
+                        risk_score += 2
+                    elif age >= 45:
+                        risk_score += 1
+                
+                # BMI risk (0-2 points)
+                if bmi_idx is not None:
+                    bmi = X[i, bmi_idx]
+                    if bmi >= 30:
+                        risk_score += 2
+                    elif bmi >= 25:
+                        risk_score += 1
+                
+                # Blood pressure risk (0-1 point)
+                if bp_idx is not None:
+                    bp = X[i, bp_idx]
+                    if bp >= 140:  # Assuming systolic BP
+                        risk_score += 1
+                
+                # Convert risk score to level
+                if risk_score >= 4:
+                    risk_levels[i] = 4  # Very high risk
+                elif risk_score == 3:
+                    risk_levels[i] = 3  # High risk
+                elif risk_score == 2:
+                    risk_levels[i] = 2  # Moderate risk
+                else:
+                    risk_levels[i] = 1  # Low risk
+            
+            return risk_levels
+            
+        except Exception as e:
+            print(f"Error calculating risk levels: {str(e)}")
+            return np.ones(len(X))  # Return moderate risk as default
+
     def get_feature_importance(self, model_name, stage):
         """Get feature importance for a specific model and stage."""
         try:
@@ -497,64 +703,3 @@ class DiabetesEnsemblePredictor:
             elif hasattr(model, 'feature_importances_'):
                 return np.zeros(len(model.feature_importances_))
             return np.zeros(20)  # Default fallback
-
-    def _calculate_uncertainties(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Calculate multiple uncertainty metrics efficiently."""
-        try:
-            all_predictions = []
-            stage_predictions = {stage: {name: [] for name in ['lgb', 'xgb', 'cat']} 
-                               for stage in ['screening', 'confirmation']}
-            
-            # First collect and cache predictions from all models
-            for stage in ['screening', 'confirmation']:
-                for name in ['lgb', 'xgb', 'cat']:
-                    try:
-                        preds = np.array([
-                            model.predict_proba(X) for model in self.calibrated_models[stage][name]
-                        ])
-                        if preds.ndim != 3:  # Should be (n_models, n_samples, 2)
-                            raise ValueError(f"Invalid predictions shape from {name}: {preds.shape}")
-                        stage_predictions[stage][name] = preds
-                    except Exception as e:
-                        print(f"Error getting predictions for {stage} {name}: {str(e)}")
-                        # Return zero arrays if prediction fails
-                        return (np.zeros(X.shape[0]), np.zeros(X.shape[0]), np.zeros(X.shape[0]))
-            
-            # Now use MC iterations to combine predictions
-            for _ in range(self.mc_iterations):
-                stage_preds = []
-                for stage in ['screening', 'confirmation']:
-                    model_preds = []
-                    for name in ['lgb', 'xgb', 'cat']:
-                        # Randomly sample from stored predictions
-                        idx = np.random.randint(len(stage_predictions[stage][name]))
-                        model_preds.append(stage_predictions[stage][name][idx])
-                    # Average predictions from different models
-                    model_preds = np.stack(model_preds)  # Shape: (n_models, n_samples, 2)
-                    stage_preds.append(np.mean(model_preds, axis=0))  # Shape: (n_samples, 2)
-                # Average predictions from different stages
-                stage_preds = np.stack(stage_preds)  # Shape: (n_stages, n_samples, 2)
-                all_predictions.append(np.mean(stage_preds, axis=0))  # Shape: (n_samples, 2)
-            
-            predictions = np.stack(all_predictions)  # Shape: (mc_iterations, n_samples, 2)
-            
-            # Epistemic uncertainty (model uncertainty)
-            epistemic = np.std(predictions, axis=0)  # Shape: (n_samples, 2)
-            
-            # Aleatoric uncertainty (data uncertainty)
-            mean_p = np.mean(predictions, axis=0)  # Shape: (n_samples, 2)
-            aleatoric = np.sqrt(np.mean(predictions * (1 - predictions), axis=0))  # Shape: (n_samples, 2)
-            
-            # Total uncertainty (combine epistemic and aleatoric)
-            total = np.sqrt(epistemic**2 + aleatoric**2)  # Shape: (n_samples, 2)
-            
-            # Return only the uncertainties for positive class (index 1)
-            return epistemic[:, 1], aleatoric[:, 1], total[:, 1]
-            
-        except Exception as e:
-            print(f"Error in uncertainty calculation: {str(e)}")
-            print(f"Input shape: {X.shape}")
-            if 'predictions' in locals():
-                print(f"MC predictions shape: {predictions.shape}")
-            # Return zero arrays if calculation fails
-            return np.zeros(X.shape[0]), np.zeros(X.shape[0]), np.zeros(X.shape[0])

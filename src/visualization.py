@@ -115,30 +115,48 @@ def plot_uncertainty_distribution(probas: np.ndarray,
     if len(probas) > sample_size:
         idx = np.random.choice(len(probas), sample_size, replace=False)
         probas_sample = probas[idx]
-        uncertainties_sample = {k: v[idx] for k, v in uncertainties.items()}
     else:
+        idx = slice(None)
         probas_sample = probas
-        uncertainties_sample = uncertainties
     
     try:
-        # Create subplots for each uncertainty type
-        n_types = len(uncertainties_sample)
-        fig, axes = plt.subplots(n_types, 2, figsize=(12, 4*n_types))
+        # Extract uncertainty values, handling nested structure
+        uncertainty_data = {}
+        if 'uncertainties' in uncertainties:
+            base_uncertainties = uncertainties['uncertainties']
+            # Add base uncertainties
+            for key in ['total', 'epistemic', 'aleatoric']:
+                if key in base_uncertainties:
+                    uncertainty_data[key] = base_uncertainties[key][idx]
+            # Add stage-specific uncertainties
+            for stage in ['screening', 'confirmation']:
+                if stage in base_uncertainties:
+                    for key in ['epistemic', 'aleatoric']:
+                        if key in base_uncertainties[stage]:
+                            uncertainty_data[f'{stage}_{key}'] = base_uncertainties[stage][key][idx]
         
-        for i, (unc_type, unc_values) in enumerate(uncertainties_sample.items()):
-            ax1, ax2 = axes[i] if n_types > 1 else axes
-            
+        # Create subplots for each uncertainty type
+        n_types = len(uncertainty_data)
+        if n_types == 0:
+            print("No uncertainty data to plot")
+            return
+        
+        fig, axes = plt.subplots(n_types, 2, figsize=(12, 4*n_types))
+        if n_types == 1:
+            axes = axes.reshape(1, 2)
+        
+        for i, (unc_type, unc_values) in enumerate(uncertainty_data.items()):
             # Scatter plot
-            ax1.scatter(probas_sample, unc_values, alpha=0.3, s=5)
-            ax1.set_xlabel('Predicted Probability')
-            ax1.set_ylabel(f'{unc_type.title()} Uncertainty')
-            ax1.set_title(f'{unc_type.title()} Uncertainty vs Probability')
+            axes[i, 0].scatter(probas_sample, unc_values, alpha=0.3, s=5)
+            axes[i, 0].set_xlabel('Predicted Probability')
+            axes[i, 0].set_ylabel(f'{unc_type.title()} Uncertainty')
+            axes[i, 0].set_title(f'{unc_type.title()} Uncertainty vs Probability')
             
             # Histogram
-            ax2.hist(unc_values, bins=50, alpha=0.7, color='skyblue')
-            ax2.set_xlabel(f'{unc_type.title()} Uncertainty')
-            ax2.set_ylabel('Count')
-            ax2.set_title(f'{unc_type.title()} Uncertainty Distribution')
+            axes[i, 1].hist(unc_values, bins=50, alpha=0.7, color='skyblue')
+            axes[i, 1].set_xlabel(f'{unc_type.title()} Uncertainty')
+            axes[i, 1].set_ylabel('Count')
+            axes[i, 1].set_title(f'{unc_type.title()} Uncertainty Distribution')
         
         plt.tight_layout()
         plt.savefig('metrics/plots/uncertainty_distribution.png', dpi=300, bbox_inches='tight')
