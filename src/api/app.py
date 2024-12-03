@@ -15,61 +15,221 @@ if src_path not in sys.path:
 
 app = FastAPI(
     title="Diabetes Prediction API",
-    description="API for predicting diabetes risk with uncertainty estimation",
+    description="""
+    This API predicts diabetes risk based on various health indicators. 
+    
+    Key Features:
+    - Predicts diabetes risk with confidence level
+    - Provides detailed health warnings
+    - Shows risk factors and their importance
+    - Includes uncertainty estimates
+    
+    How to use:
+    1. Use the /predict endpoint with your health indicators
+    2. Review the prediction results and risk assessment
+    3. Pay attention to health warnings and recommended actions
+    4. Consider consulting healthcare professionals based on the risk level
+    
+    Note: This tool is for informational purposes only and should not replace professional medical advice.
+    """,
     version="1.0.0"
 )
 
 class HealthIndicators(BaseModel):
-    BMI: float = Field(..., ge=10.0, le=100.0, description="Body Mass Index")
-    Age: int = Field(..., ge=1, le=13, description="Age category (1: 18-24, 2: 25-29, ..., 13: 80 or older)")
-    GenHlth: int = Field(..., ge=1, le=5, description="General Health (1=excellent to 5=poor)")
-    MentHlth: int = Field(..., ge=0, le=30, description="Days of poor mental health in past month")
-    PhysHlth: int = Field(..., ge=0, le=30, description="Days of poor physical health in past month")
-    HighBP: int = Field(..., ge=0, le=1, description="High Blood Pressure (0=no, 1=yes)")
-    HighChol: int = Field(..., ge=0, le=1, description="High Cholesterol (0=no, 1=yes)")
-    CholCheck: int = Field(..., ge=0, le=1, description="Cholesterol Check in past 5 years (0=no, 1=yes)")
-    Smoker: int = Field(..., ge=0, le=1, description="Smoking Status (0=no, 1=yes)")
-    Stroke: int = Field(..., ge=0, le=1, description="History of Stroke (0=no, 1=yes)")
-    HeartDiseaseorAttack: int = Field(..., ge=0, le=1, description="History of Heart Disease (0=no, 1=yes)")
-    PhysActivity: int = Field(..., ge=0, le=1, description="Physical Activity in past month (0=no, 1=yes)")
-    Fruits: int = Field(..., ge=0, le=1, description="Fruit consumption 1+ times per day (0=no, 1=yes)")
-    Veggies: int = Field(..., ge=0, le=1, description="Vegetable consumption 1+ times per day (0=no, 1=yes)")
-    HvyAlcoholConsump: int = Field(..., ge=0, le=1, description="Heavy Alcohol Consumption (0=no, 1=yes)")
-    AnyHealthcare: int = Field(..., ge=0, le=1, description="Has Healthcare Coverage (0=no, 1=yes)")
-    NoDocbcCost: int = Field(..., ge=0, le=1, description="Could not see doctor due to cost (0=no, 1=yes)")
-    DiffWalk: int = Field(..., ge=0, le=1, description="Difficulty Walking (0=no, 1=yes)")
-    Sex: int = Field(..., ge=0, le=1, description="Sex (0=female, 1=male)")
-    Education: int = Field(..., ge=1, le=6, description="Education Level (1=lowest to 6=highest)")
-    Income: int = Field(..., ge=1, le=8, description="Income Level (1=lowest to 8=highest)")
+    """Input health indicators for diabetes prediction"""
+    
+    BMI: float = Field(
+        ..., 
+        ge=10.0, 
+        le=100.0, 
+        description="Body Mass Index (weight in kg / height in meters squared). Normal range: 18.5-24.9, Overweight: 25-29.9, Obese: 30+"
+    )
+    Age: int = Field(
+        ..., 
+        ge=1, 
+        le=13, 
+        description="""Age category:
+        1: 18-24 years
+        2: 25-29 years
+        3: 30-34 years
+        4: 35-39 years
+        5: 40-44 years
+        6: 45-49 years
+        7: 50-54 years
+        8: 55-59 years
+        9: 60-64 years
+        10: 65-69 years
+        11: 70-74 years
+        12: 75-79 years
+        13: 80+ years"""
+    )
+    GenHlth: int = Field(
+        ..., 
+        ge=1, 
+        le=5, 
+        description="""General Health Rating:
+        1: Excellent
+        2: Very Good
+        3: Good
+        4: Fair
+        5: Poor"""
+    )
+    MentHlth: int = Field(
+        ..., 
+        ge=0, 
+        le=30, 
+        description="Number of days of poor mental health in past 30 days (0-30). High values may indicate stress or depression."
+    )
+    PhysHlth: int = Field(
+        ..., 
+        ge=0, 
+        le=30, 
+        description="Number of days of poor physical health in past 30 days (0-30). High values may indicate chronic conditions."
+    )
+    HighBP: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="High Blood Pressure status (0: No, 1: Yes). Important cardiovascular risk factor."
+    )
+    HighChol: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="High Cholesterol status (0: No, 1: Yes). Key indicator for metabolic health."
+    )
+    CholCheck: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Cholesterol check in past 5 years (0: No, 1: Yes). Regular monitoring is important."
+    )
+    Smoker: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Smoking status (0: No, 1: Yes). Significant risk factor for multiple health conditions."
+    )
+    Stroke: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="History of stroke (0: No, 1: Yes). Indicates serious cardiovascular risk."
+    )
+    HeartDiseaseorAttack: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="History of heart disease or heart attack (0: No, 1: Yes). Strong correlation with diabetes."
+    )
+    PhysActivity: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Physical activity in past month (0: No, 1: Yes). Regular exercise helps prevent diabetes."
+    )
+    Fruits: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Consumes fruit 1+ times per day (0: No, 1: Yes). Part of healthy diet."
+    )
+    Veggies: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Consumes vegetables 1+ times per day (0: No, 1: Yes). Important for balanced nutrition."
+    )
+    HvyAlcoholConsump: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Heavy alcohol consumption (0: No, 1: Yes). Can impact blood sugar levels."
+    )
+    AnyHealthcare: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Has any kind of healthcare coverage (0: No, 1: Yes). Important for preventive care."
+    )
+    NoDocbcCost: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Could not see doctor due to cost (0: No, 1: Yes). May indicate barriers to healthcare."
+    )
+    DiffWalk: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Difficulty walking or climbing stairs (0: No, 1: Yes). May limit physical activity."
+    )
+    Sex: int = Field(
+        ..., 
+        ge=0, 
+        le=1, 
+        description="Biological sex (0: Female, 1: Male). May affect risk factors."
+    )
+    Education: int = Field(
+        ..., 
+        ge=1, 
+        le=6, 
+        description="""Education Level:
+        1: Never attended school or only kindergarten
+        2: Elementary
+        3: Some high school
+        4: High school graduate
+        5: Some college or technical school
+        6: College graduate"""
+    )
+    Income: int = Field(
+        ..., 
+        ge=1, 
+        le=8, 
+        description="""Income Level:
+        1: Less than $10,000
+        2: $10,000 to $15,000
+        3: $15,000 to $20,000
+        4: $20,000 to $25,000
+        5: $25,000 to $35,000
+        6: $35,000 to $50,000
+        7: $50,000 to $75,000
+        8: $75,000 or more"""
+    )
 
     @validator('BMI')
     def validate_bmi(cls, v):
+        """Validate BMI is within reasonable range"""
         if v < 10.0 or v > 100.0:
             raise ValueError('BMI must be between 10 and 100')
         return v
 
 class StageResult(BaseModel):
-    probability: float
-    risk_assessment: str
+    """Results for each prediction stage"""
+    probability: float = Field(..., description="Probability of diabetes (0-1)")
+    risk_assessment: str = Field(..., description="Risk level assessment with recommended actions")
 
 class UncertaintyEstimates(BaseModel):
-    epistemic: float
-    aleatoric: float
-    total: float
+    """Model uncertainty estimates"""
+    epistemic: float = Field(..., description="Model uncertainty - uncertainty in the model's knowledge")
+    aleatoric: float = Field(..., description="Data uncertainty - natural variability in the data")
+    total: float = Field(..., description="Total uncertainty (epistemic + aleatoric)")
 
 class FeatureImportance(BaseModel):
-    importance: float
-    description: str
+    """Importance and description of risk factors"""
+    importance: float = Field(..., description="Relative importance of this factor (0-1)")
+    description: str = Field(..., description="Description of how this factor affects diabetes risk")
 
 class PredictionResponse(BaseModel):
-    has_diabetes: bool
-    confidence_percentage: float
-    screening_stage: StageResult
-    confirmation_stage: StageResult
-    risk_level: str
-    uncertainties: UncertaintyEstimates
-    warnings: Optional[List[str]] = None
-    feature_importances: Dict[str, FeatureImportance]
+    """Complete prediction response with all details"""
+    has_diabetes: bool = Field(..., description="Final diabetes prediction (True/False)")
+    confidence_percentage: float = Field(..., description="Confidence in the prediction (0-100%)")
+    screening_stage: StageResult = Field(..., description="Initial screening results")
+    confirmation_stage: StageResult = Field(..., description="Confirmation stage results")
+    risk_level: str = Field(..., description="Overall risk assessment with recommended actions")
+    uncertainties: UncertaintyEstimates = Field(..., description="Uncertainty estimates for the prediction")
+    warnings: Optional[List[str]] = Field(None, description="Health warnings and recommendations based on input values")
+    feature_importances: Dict[str, FeatureImportance] = Field(..., description="Risk factors and their importance")
 
 # Initialize model and preprocessor variables
 model = None
